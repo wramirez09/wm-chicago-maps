@@ -1,11 +1,10 @@
 import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
 import React from 'react';
 
+import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_REGULAR, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
 import {ARTERIALS} from '../../data/arterials';
 import type {OverlayPressHandler} from './types';
-
-export const ARTERIAL_ACCENT = '#b45309';
 
 const SOURCE_ID = 'arterials';
 
@@ -33,7 +32,7 @@ export function ArterialOverlay({visible, onPress}: Props) {
             'match',
             ['get', 'kind'],
             'primary',
-            ARTERIAL_ACCENT,
+            LAYER_ACCENT.arterials,
             '#d97706',
           ],
           'line-width': [

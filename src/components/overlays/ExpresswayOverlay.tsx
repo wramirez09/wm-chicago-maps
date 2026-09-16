@@ -1,11 +1,10 @@
 import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
 import React from 'react';
 
+import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_BOLD, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
 import {EXPRESSWAYS} from '../../data/expressways';
 import type {OverlayPressHandler} from './types';
-
-export const EXPRESSWAY_ACCENT = '#1d4ed8';
 
 const SOURCE_ID = 'expressways';
 
@@ -56,7 +55,7 @@ export function ExpresswayOverlay({visible, onPress}: Props) {
             'match',
             ['get', 'kind'],
             'motorway',
-            EXPRESSWAY_ACCENT,
+            LAYER_ACCENT.expressways,
             '#60a5fa',
           ],
           'line-width': [

@@ -8,6 +8,8 @@ A bare React Native app (no Expo) rendering a MapLibre map of Chicago.
   key. See [Swapping the basemap](#swapping-the-basemap).
 - **Overlays:** Chicago expressways, arterial streets and the CTA 'L' network,
   each toggleable and tappable. See [Map data](#map-data).
+- **Search:** offline search over that data — no geocoder, no API key. See
+  [Search](#search).
 
 ## Requirements
 
@@ -59,6 +61,9 @@ npm test
 | `src/components/MapScreen.tsx` | Map, camera, overlay wiring, tap handling |
 | `src/components/overlays/` | One component per data layer (source + style layers) |
 | `src/components/LayerToggle.tsx` | Chips that show/hide each overlay |
+| `src/components/SearchBar.tsx` | Search field + results list |
+| `src/search/searchIndex.ts` | Builds and queries the offline search index |
+| `src/config/layers.ts` | Layer keys, accent colours, labels, focus zooms |
 | `src/components/FeatureCard.tsx` | Bottom card shown when a feature is tapped |
 | `__mocks__/@maplibre/` | Jest mock — MapLibre is native and can't render in Jest |
 
@@ -93,6 +98,35 @@ through MapLibre's built-in attribution control — keep it visible.
 Overlay layers pass `beforeId={LABEL_ANCHOR_LAYER_ID}` so they draw above the
 basemap's roads but below its labels. Landmarks deliberately omit it and sit on
 top of everything.
+
+## Search
+
+`src/search/searchIndex.ts` indexes the committed datasets — landmark names,
+CTA station names, 'L' line names, expressway names and every distinct arterial
+street name — and matches them as the user types. It needs no network and no
+API key, and a warm query takes well under a millisecond.
+
+The index is built lazily on the first keystroke (~25 ms to walk ~25k
+features), not at startup. Lines sharing a name are collapsed into one result,
+whose camera target is the real vertex nearest the group's bounding-box centre
+— a street that bends or is split around a park has a box centre that can sit
+blocks off the pavement.
+
+Three behaviours worth knowing before changing the ranking:
+
+- Punctuation is a word break, so `O'Hare` indexes as `o hare`; a compact
+  fallback (`ohare`) also matches, letting the query disagree with the data
+  about spacing.
+- At most two results may share a name (`MAX_PER_NAME`). The 'L' has four
+  stations called Western; without the cap they bury Western Avenue.
+- Stations with the same name *and* the same serving lines are collapsed —
+  that pattern means one platform split across two OSM records.
+
+**It does not do street addresses.** "1060 W Addison" finds nothing. Adding
+that means a geocoder (Nominatim and Photon are free; both have usage policies,
+and Nominatim requires a real User-Agent). Wire one in as a second result
+source behind `searchLocations`, merging its hits into the same `SearchResult`
+shape — the UI needs no change.
 
 ## Swapping the basemap
 

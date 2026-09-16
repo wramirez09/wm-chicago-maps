@@ -1,11 +1,10 @@
 import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
 import React from 'react';
 
+import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_REGULAR} from '../../config/map';
 import {LANDMARKS} from '../../data/landmarks';
 import type {OverlayPressHandler} from './types';
-
-export const LANDMARK_ACCENT = '#e4572e';
 
 const SOURCE_ID = 'landmarks';
 
@@ -29,7 +28,7 @@ export function LandmarkOverlay({visible, onPress}: Props) {
         source={SOURCE_ID}
         paint={{
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 5, 15, 11],
-          'circle-color': LANDMARK_ACCENT,
+          'circle-color': LAYER_ACCENT.landmarks,
           'circle-stroke-width': 2,
           'circle-stroke-color': '#ffffff',
         }}

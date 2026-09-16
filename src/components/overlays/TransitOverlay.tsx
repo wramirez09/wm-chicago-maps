@@ -5,8 +5,6 @@ import {FONT_REGULAR, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
 import {TRANSIT_LINES, TRANSIT_STATIONS} from '../../data/transit';
 import type {OverlayPressHandler} from './types';
 
-export const TRANSIT_ACCENT = '#0f766e';
-
 const LINE_SOURCE_ID = 'transit-lines';
 const STATION_SOURCE_ID = 'transit-stations';
 

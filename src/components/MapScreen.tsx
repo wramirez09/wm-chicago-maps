@@ -10,14 +10,17 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {FeatureCard, type MapSelection} from './FeatureCard';
 import {LayerToggle} from './LayerToggle';
-import {ArterialOverlay, ARTERIAL_ACCENT} from './overlays/ArterialOverlay';
+import {SearchBar} from './SearchBar';
+import {ArterialOverlay} from './overlays/ArterialOverlay';
+import {ExpresswayOverlay} from './overlays/ExpresswayOverlay';
+import {LandmarkOverlay} from './overlays/LandmarkOverlay';
+import {TransitOverlay} from './overlays/TransitOverlay';
 import {
-  ExpresswayOverlay,
-  EXPRESSWAY_ACCENT,
-} from './overlays/ExpresswayOverlay';
-import {LandmarkOverlay, LANDMARK_ACCENT} from './overlays/LandmarkOverlay';
-import {TransitOverlay, TRANSIT_ACCENT} from './overlays/TransitOverlay';
-import type {LayerKey, LayerVisibility} from './overlays/types';
+  FOCUS_ZOOM,
+  LAYER_ACCENT,
+  type LayerKey,
+  type LayerVisibility,
+} from '../config/layers';
 import {
   CHICAGO_BOUNDS,
   CHICAGO_CENTER,
@@ -33,20 +36,13 @@ import type {
   TransitLineProperties,
   TransitStationProperties,
 } from '../data/transit';
+import type {SearchResult} from '../search/searchIndex';
 
 const INITIAL_VISIBILITY: LayerVisibility = {
   expressways: true,
   arterials: true,
   transit: true,
   landmarks: true,
-};
-
-/** Zoom the camera eases to when a feature is tapped, per layer. */
-const FOCUS_ZOOM: Record<LayerKey, number> = {
-  expressways: 12,
-  arterials: 14,
-  transit: 13,
-  landmarks: 14,
 };
 
 type PressEvent = NativeSyntheticEvent<PressEventWithFeatures>;
@@ -72,7 +68,6 @@ export function MapScreen() {
     <T,>(
       layer: LayerKey,
       describe: (properties: T) => Omit<MapSelection, 'accent'>,
-      accent: string,
     ) =>
       (event: PressEvent) => {
         const feature = event.nativeEvent.features[0];
@@ -80,7 +75,10 @@ export function MapScreen() {
           return;
         }
 
-        setSelected({...describe(feature.properties as T), accent});
+        setSelected({
+          ...describe(feature.properties as T),
+          accent: LAYER_ACCENT[layer],
+        });
 
         const center = centerOf(feature.geometry);
         if (center) {
@@ -93,6 +91,26 @@ export function MapScreen() {
       },
     [],
   );
+
+  const handleSearchSelect = useCallback((result: SearchResult) => {
+    // Searching for something on a hidden layer should show it, not fly to
+    // blank map.
+    setVisibility(current =>
+      current[result.layer] ? current : {...current, [result.layer]: true},
+    );
+
+    setSelected({
+      title: result.title,
+      subtitle: result.subtitle,
+      accent: result.accent,
+    });
+
+    cameraRef.current?.easeTo({
+      center: result.center,
+      zoom: result.zoom,
+      duration: 600,
+    });
+  }, []);
 
   const handleMapPress = useCallback(() => setSelected(null), []);
 
@@ -117,54 +135,47 @@ export function MapScreen() {
             arterials sit under expressways, which sit under transit. */}
         <ArterialOverlay
           visible={visibility.arterials}
-          onPress={selectFeature<ArterialProperties>(
-            'arterials',
-            p => ({title: p.name, subtitle: labelForArterial(p.kind)}),
-            ARTERIAL_ACCENT,
-          )}
+          onPress={selectFeature<ArterialProperties>('arterials', p => ({
+            title: p.name,
+            subtitle: p.kind === 'primary' ? 'Major street' : 'Street',
+          }))}
         />
         <ExpresswayOverlay
           visible={visibility.expressways}
-          onPress={selectFeature<ExpresswayProperties>(
-            'expressways',
-            p => ({
-              title: p.localName || p.name || p.ref,
-              subtitle: [p.ref, p.localName ? p.name : '']
-                .filter(Boolean)
-                .join(' · '),
-            }),
-            EXPRESSWAY_ACCENT,
-          )}
+          onPress={selectFeature<ExpresswayProperties>('expressways', p => ({
+            title: p.localName || p.name || p.ref,
+            subtitle: [p.ref, p.localName ? p.name : '']
+              .filter(Boolean)
+              .join(' · '),
+          }))}
         />
         <TransitOverlay
           visible={visibility.transit}
           onPress={selectFeature<
             TransitLineProperties | TransitStationProperties
-          >(
-            'transit',
-            p =>
-              'line' in p
-                ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
-                : {
-                    title: p.name,
-                    subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
-                  },
-            TRANSIT_ACCENT,
+          >('transit', p =>
+            'line' in p
+              ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
+              : {
+                  title: p.name,
+                  subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
+                },
           )}
         />
         <LandmarkOverlay
           visible={visibility.landmarks}
-          onPress={selectFeature<LandmarkProperties>(
-            'landmarks',
-            p => ({title: p.name, subtitle: p.neighborhood}),
-            LANDMARK_ACCENT,
-          )}
+          onPress={selectFeature<LandmarkProperties>('landmarks', p => ({
+            title: p.name,
+            subtitle: p.neighborhood,
+          }))}
         />
       </Map>
 
+      {/* Search sits above the chips; both clear the compass on the right. */}
       <View
-        style={[styles.toggleWrapper, {top: insets.top + 12}]}
+        style={[styles.topWrapper, {top: insets.top + 12}]}
         pointerEvents="box-none">
+        <SearchBar onSelect={handleSearchSelect} />
         <LayerToggle visibility={visibility} onToggle={toggleLayer} />
       </View>
 
@@ -177,10 +188,6 @@ export function MapScreen() {
       ) : null}
     </View>
   );
-}
-
-function labelForArterial(kind: ArterialProperties['kind']): string {
-  return kind === 'primary' ? 'Major street' : 'Secondary street';
 }
 
 /**
@@ -206,11 +213,12 @@ function centerOf(geometry: GeoJSON.Geometry): [number, number] | null {
 const styles = StyleSheet.create({
   container: {flex: 1},
   map: {flex: 1},
-  toggleWrapper: {
+  topWrapper: {
     position: 'absolute',
     left: 12,
     // Keep clear of the compass in the top-right corner.
     right: 60,
+    gap: 8,
   },
   cardWrapper: {
     position: 'absolute',

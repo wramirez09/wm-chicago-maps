@@ -1,18 +1,13 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {ARTERIAL_ACCENT} from './overlays/ArterialOverlay';
-import {EXPRESSWAY_ACCENT} from './overlays/ExpresswayOverlay';
-import {LANDMARK_ACCENT} from './overlays/LandmarkOverlay';
-import {TRANSIT_ACCENT} from './overlays/TransitOverlay';
-import type {LayerKey, LayerVisibility} from './overlays/types';
-
-const LAYERS: {key: LayerKey; label: string; accent: string}[] = [
-  {key: 'expressways', label: 'Expressways', accent: EXPRESSWAY_ACCENT},
-  {key: 'arterials', label: 'Streets', accent: ARTERIAL_ACCENT},
-  {key: 'transit', label: 'CTA rail', accent: TRANSIT_ACCENT},
-  {key: 'landmarks', label: 'Landmarks', accent: LANDMARK_ACCENT},
-];
+import {
+  LAYER_ACCENT,
+  LAYER_LABEL,
+  LAYER_ORDER,
+  type LayerKey,
+  type LayerVisibility,
+} from '../config/layers';
 
 type Props = {
   visibility: LayerVisibility;
@@ -22,13 +17,13 @@ type Props = {
 export function LayerToggle({visibility, onToggle}: Props) {
   return (
     <View style={styles.row}>
-      {LAYERS.map(({key, label, accent}) => {
+      {LAYER_ORDER.map(key => {
         const on = visibility[key];
         // Built out here rather than inline: the swatch colour is data, and the
         // no-inline-styles lint rule can't tell those apart.
         const dotStyle = {
-          backgroundColor: on ? accent : 'transparent',
-          borderColor: accent,
+          backgroundColor: on ? LAYER_ACCENT[key] : 'transparent',
+          borderColor: LAYER_ACCENT[key],
         };
         return (
           <Pressable
@@ -37,9 +32,11 @@ export function LayerToggle({visibility, onToggle}: Props) {
             style={[styles.chip, on && styles.chipOn]}
             accessibilityRole="switch"
             accessibilityState={{checked: on}}
-            accessibilityLabel={label}>
+            accessibilityLabel={LAYER_LABEL[key]}>
             <View style={[styles.dot, dotStyle]} />
-            <Text style={[styles.label, on && styles.labelOn]}>{label}</Text>
+            <Text style={[styles.label, on && styles.labelOn]}>
+              {LAYER_LABEL[key]}
+            </Text>
           </Pressable>
         );
       })}
