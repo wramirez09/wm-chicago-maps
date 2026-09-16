@@ -1,12 +1,18 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 
+import {NeighborhoodSummary} from './NeighborhoodSummary';
+
 /** Whatever the user last tapped on the map, flattened for display. */
 export type MapSelection = {
   title: string;
   subtitle: string;
   /** Swatch colour, so the card reads as belonging to the layer it came from. */
   accent: string;
+  /** Extra facts, one per line — dock counts, licence type, address. */
+  details?: string[];
+  /** A community area to pull a Wikipedia summary for. */
+  neighborhood?: string;
 };
 
 type Props = {
@@ -23,6 +29,14 @@ export function FeatureCard({selection, onDismiss}: Props) {
         {selection.subtitle ? (
           <Text style={styles.subtitle}>{selection.subtitle}</Text>
         ) : null}
+        {selection.details?.map(line => (
+          <Text key={line} style={styles.detail}>
+            {line}
+          </Text>
+        ))}
+        {selection.neighborhood ? (
+          <NeighborhoodSummary neighborhood={selection.neighborhood} />
+        ) : null}
       </View>
       <Pressable
         onPress={onDismiss}
@@ -38,7 +52,9 @@ export function FeatureCard({selection, onDismiss}: Props) {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top-aligned now that the card can grow; centred looked wrong once a
+    // Wikipedia paragraph pushed it to several lines.
+    alignItems: 'flex-start',
     gap: 12,
     backgroundColor: '#ffffff',
     borderRadius: 14,
@@ -54,5 +70,6 @@ const styles = StyleSheet.create({
   text: {flex: 1},
   name: {fontSize: 17, fontWeight: '600', color: '#111827'},
   subtitle: {marginTop: 2, fontSize: 14, color: '#6b7280'},
+  detail: {marginTop: 4, fontSize: 13, color: '#374151'},
   dismiss: {fontSize: 18, color: '#9ca3af', paddingHorizontal: 4},
 });

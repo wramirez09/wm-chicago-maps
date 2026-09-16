@@ -3,15 +3,19 @@ import {
   type CameraRef,
   Map,
   type PressEventWithFeatures,
+  type ViewStateChangeEvent,
 } from '@maplibre/maplibre-react-native';
-import React, {useCallback, useRef, useState} from 'react';
-import {type NativeSyntheticEvent, StyleSheet, View} from 'react-native';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {type NativeSyntheticEvent, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {FeatureCard, type MapSelection} from './FeatureCard';
 import {LayerToggle} from './LayerToggle';
 import {SearchBar} from './SearchBar';
+import {WeatherChip} from './WeatherChip';
 import {ArterialOverlay} from './overlays/ArterialOverlay';
+import {BUSINESS_MIN_ZOOM, BusinessOverlay} from './overlays/BusinessOverlay';
+import {DivvyOverlay} from './overlays/DivvyOverlay';
 import {ExpresswayOverlay} from './overlays/ExpresswayOverlay';
 import {LandmarkOverlay} from './overlays/LandmarkOverlay';
 import {TransitOverlay} from './overlays/TransitOverlay';
@@ -36,6 +40,10 @@ import type {
   TransitLineProperties,
   TransitStationProperties,
 } from '../data/transit';
+import type {BusinessLicense} from '../lib/api/places/businessLicenses';
+import type {BBox} from '../lib/api/places/socrata';
+import type {DivvyStation} from '../lib/api/transit/divvyGbfs';
+import {roundCoordinate, snapBBox} from '../lib/geo';
 import type {SearchResult} from '../search/searchIndex';
 
 const INITIAL_VISIBILITY: LayerVisibility = {
@@ -43,9 +51,15 @@ const INITIAL_VISIBILITY: LayerVisibility = {
   arterials: true,
   transit: true,
   landmarks: true,
+  // Live layers start off: turning one on is what makes its first request,
+  // so the map still opens instantly and works offline.
+  divvy: false,
+  businesses: false,
 };
 
 type PressEvent = NativeSyntheticEvent<PressEventWithFeatures>;
+
+type Viewport = {bbox: BBox; zoom: number; center: [number, number]};
 
 export function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -53,6 +67,24 @@ export function MapScreen() {
   const [selected, setSelected] = useState<MapSelection | null>(null);
   const [visibility, setVisibility] =
     useState<LayerVisibility>(INITIAL_VISIBILITY);
+  const [viewport, setViewport] = useState<Viewport | null>(null);
+
+  // Fires once per gesture, at rest — not per frame — so no debounce needed.
+  // The bbox is snapped so small pans reuse the cached business query.
+  const handleRegionDidChange = useCallback(
+    (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
+      const {bounds, zoom, center} = event.nativeEvent;
+      setViewport({bbox: snapBBox(bounds), zoom, center});
+    },
+    [],
+  );
+
+  // Weather for the map centre, rounded to ~11 km. At city scale that is one
+  // lookup for the whole session instead of one per pan.
+  const weatherAt = useMemo(() => {
+    const [lng, lat] = viewport?.center ?? CHICAGO_CENTER;
+    return {latitude: roundCoordinate(lat), longitude: roundCoordinate(lng)};
+  }, [viewport?.center]);
 
   const toggleLayer = useCallback((key: LayerKey) => {
     setVisibility(current => ({...current, [key]: !current[key]}));
@@ -62,7 +94,7 @@ export function MapScreen() {
 
   /**
    * Every overlay funnels its taps through here. `describe` turns that layer's
-   * feature properties into card text; the camera move is shared.
+   * feature properties into card content; the camera move is shared.
    */
   const selectFeature = useCallback(
     <T,>(
@@ -114,12 +146,18 @@ export function MapScreen() {
 
   const handleMapPress = useCallback(() => setSelected(null), []);
 
+  const businessesNeedZoom =
+    visibility.businesses &&
+    viewport !== null &&
+    viewport.zoom < BUSINESS_MIN_ZOOM;
+
   return (
     <View style={styles.container}>
       <Map
         style={styles.map}
         mapStyle={MAP_STYLE_URL}
         onPress={handleMapPress}
+        onRegionDidChange={handleRegionDidChange}
         compass
         compassPosition={{top: insets.top + 12, right: 12}}
         attributionPosition={{bottom: insets.bottom + 12, right: 12}}>
@@ -162,11 +200,37 @@ export function MapScreen() {
                 },
           )}
         />
+        <BusinessOverlay
+          visible={visibility.businesses}
+          bbox={viewport?.bbox ?? null}
+          zoom={viewport?.zoom ?? CHICAGO_ZOOM}
+          onPress={selectFeature<BusinessLicense>('businesses', p => ({
+            title: p.doing_business_as_name || p.legal_name || 'Business',
+            subtitle: p.business_activity || p.license_description || '',
+            details: [
+              p.address,
+              p.community_area_name ? `Community area: ${p.community_area_name}` : undefined,
+              p.expiration_date ? `Licence valid to ${p.expiration_date.slice(0, 10)}` : undefined,
+            ].filter((line): line is string => Boolean(line)),
+          }))}
+        />
+        <DivvyOverlay
+          visible={visibility.divvy}
+          onPress={selectFeature<DivvyStation>('divvy', p => ({
+            title: p.name,
+            subtitle: p.isRenting ? 'Divvy station · live' : 'Divvy station · not renting',
+            details: [
+              `${p.bikesAvailable} bikes available (${p.ebikesAvailable} e-bikes)`,
+              `${p.docksAvailable} open docks`,
+            ],
+          }))}
+        />
         <LandmarkOverlay
           visible={visibility.landmarks}
           onPress={selectFeature<LandmarkProperties>('landmarks', p => ({
             title: p.name,
             subtitle: p.neighborhood,
+            neighborhood: p.neighborhood,
           }))}
         />
       </Map>
@@ -177,6 +241,12 @@ export function MapScreen() {
         pointerEvents="box-none">
         <SearchBar onSelect={handleSearchSelect} />
         <LayerToggle visibility={visibility} onToggle={toggleLayer} />
+        <WeatherChip coordinates={weatherAt} />
+        {businessesNeedZoom ? (
+          <View style={styles.hint}>
+            <Text style={styles.hintText}>Zoom in to see businesses</Text>
+          </View>
+        ) : null}
       </View>
 
       {selected ? (
@@ -220,6 +290,14 @@ const styles = StyleSheet.create({
     right: 60,
     gap: 8,
   },
+  hint: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+  },
+  hintText: {fontSize: 12, color: '#ffffff', fontWeight: '500'},
   cardWrapper: {
     position: 'absolute',
     left: 16,

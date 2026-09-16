@@ -1,112 +1,73 @@
 /**
- * Sentry + PostHog initialisation.
+ * Sentry + PostHog — the seam the app reports through.
  *
  * Sentry:  https://docs.sentry.io/platforms/react-native/
  * PostHog: https://posthog.com/docs/libraries/react-native
  *
- * ⚠️ NOT WIRED UP. Neither SDK is a dependency yet — both have a native side,
- * and Sentry's install also rewrites the Xcode build phases to upload source
- * maps. Installing them blind would change the native projects under you.
+ * ⚠️ NOT WIRED UP. Neither SDK is installed. Until they are, every function
+ * here is a safe no-op (errors still reach the console), so the rest of the app
+ * can call `captureError` / `track` today and gain real reporting later without
+ * touching any call site.
  *
- * `initObservability()` is safe to call today: with nothing installed and no
- * DSN configured it is a no-op that logs once. Wire it into App.tsx now and it
- * starts working as soon as the setup below is done.
+ * Why there is no "load the SDK if it happens to be installed" trick here:
+ * Metro resolves every `require('some-package')` string literal statically, at
+ * bundle time, before any code runs. A try/catch around the require cannot
+ * catch a missing package — the whole bundle fails to build and the app shows a
+ * red screen. (Jest resolves requires at runtime instead, which is why tests
+ * never caught this.) So the SDK imports can only exist once the packages do.
  *
- * ── Sentry setup ─────────────────────────────────────────────────────────
+ * ── To enable Sentry ─────────────────────────────────────────────────────
  *   npm install @sentry/react-native
  *   npx @sentry/wizard@latest -i reactNative   # patches ios/ + android/
  *   cd ios && bundle exec pod install
- *   Add SENTRY_DSN to .env.
+ *   Add SENTRY_DSN to .env and rebuild.
+ *   Then, in this file:
+ *     import * as Sentry from '@sentry/react-native';
+ *     in initObservability():  Sentry.init({dsn, tracesSampleRate: 0.1});
+ *     in captureError():        Sentry.captureException(error, {extra: context});
  *
- * ── PostHog setup ────────────────────────────────────────────────────────
+ * ── To enable PostHog ────────────────────────────────────────────────────
  *   npm install posthog-react-native @react-native-async-storage/async-storage
  *   cd ios && bundle exec pod install
- *   Add POSTHOG_API_KEY and POSTHOG_HOST to .env.
- *   Note: posthog-react-native needs async-storage (or expo-file-system) for
- *   its queue; without it, events are dropped on background.
+ *   Add POSTHOG_API_KEY (and optionally POSTHOG_HOST) to .env and rebuild.
+ *   Then, in this file:
+ *     import PostHog from 'posthog-react-native';
+ *     const posthog = new PostHog(key, {host});
+ *     in track():     posthog.capture(event, properties);
+ *     in identify():  posthog.identify(userId, properties);
+ *
+ * Keep tracesSampleRate low: a map app emits a lot of spans, and the default of
+ * 1.0 exhausts a free Sentry quota in days.
  */
 import {env} from '../api/env';
 
-type SentryLike = {
-  init: (options: Record<string, unknown>) => void;
-  captureException: (error: unknown, hint?: unknown) => void;
-};
+let initialised = false;
 
-type PostHogLike = {
-  capture: (event: string, properties?: Record<string, unknown>) => void;
-  identify: (id: string, properties?: Record<string, unknown>) => void;
-  flush?: () => Promise<void>;
-};
-
-let sentry: SentryLike | null = null;
-let postHog: PostHogLike | null = null;
-let warned = false;
-
-function optional<T>(load: () => T): T | null {
-  try {
-    return load();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Call once, as early in App.tsx as possible — errors thrown before this runs
- * are not reported.
- */
+/** Call once, as early in App.tsx as possible. Idempotent. */
 export function initObservability(): void {
-  const dsn = env('SENTRY_DSN');
-  const postHogKey = env('POSTHOG_API_KEY');
-
-  if (dsn) {
-    const module = optional(() => require('@sentry/react-native')) as SentryLike | null;
-
-    if (module) {
-      module.init({
-        dsn,
-        // Traces are sampled down hard: a map app fires a lot of spans and
-        // the default of 1.0 will exhaust a free quota in days.
-        tracesSampleRate: 0.1,
-        enableAutoSessionTracking: true,
-      });
-      sentry = module;
-    }
+  if (initialised) {
+    return;
   }
+  initialised = true;
 
-  if (postHogKey) {
-    const module = optional(() => require('posthog-react-native')) as {
-      PostHog?: new (key: string, options?: unknown) => PostHogLike;
-    } | null;
-
-    if (module?.PostHog) {
-      postHog = new module.PostHog(postHogKey, {
-        host: env('POSTHOG_HOST') ?? 'https://us.i.posthog.com',
-      });
-    }
-  }
-
-  if (!sentry && !postHog && !warned) {
-    warned = true;
+  if (env('SENTRY_DSN') || env('POSTHOG_API_KEY')) {
+    // Keys are configured but the SDKs are not installed — worth saying
+    // loudly, because it means reporting the developer expects is silently off.
     console.warn(
-      '[observability] disabled — no SDK installed or no DSN/key in .env. ' +
-        'See src/lib/observability/index.ts for setup.',
+      '[observability] SENTRY_DSN / POSTHOG_API_KEY are set, but the SDKs are ' +
+        'not installed, so nothing is being reported. See ' +
+        'src/lib/observability/index.ts.',
     );
   }
 }
 
-/** Report a handled error. Falls back to console when Sentry is absent. */
+/** Report a handled error. Console-only until Sentry is wired. */
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
-  if (sentry) {
-    sentry.captureException(error, context ? {extra: context} : undefined);
-    return;
-  }
   console.error('[error]', error, context ?? '');
 }
 
-export function track(event: string, properties?: Record<string, unknown>): void {
-  postHog?.capture(event, properties);
-}
+/** Record a product event. No-op until PostHog is wired. */
+export function track(_event: string, _properties?: Record<string, unknown>): void {}
 
-export function identify(userId: string, properties?: Record<string, unknown>): void {
-  postHog?.identify(userId, properties);
-}
+/** Associate events with a user. No-op until PostHog is wired. */
+export function identify(_userId: string, _properties?: Record<string, unknown>): void {}
