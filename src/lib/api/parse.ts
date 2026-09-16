@@ -52,3 +52,17 @@ export function toDate(value: string | undefined | null): Date | null {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
+
+/**
+ * "2.0" → "2". Several Chicago datasets store integer ids as float strings
+ * (park_no, bus systemstop), while related datasets store the same id as a
+ * plain integer string (a permit's park_number). Comparing them raw silently
+ * matches nothing, so ids are normalised before they cross datasets.
+ */
+export function toIntegerString(value: string | number | undefined | null): string | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? String(parsed) : null;
+}

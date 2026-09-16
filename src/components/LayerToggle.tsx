@@ -1,5 +1,5 @@
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 
 import {
   LAYER_ACCENT,
@@ -15,8 +15,14 @@ type Props = {
 };
 
 export function LayerToggle({visibility, onToggle}: Props) {
+  // One scrolling row rather than a wrapping block: with a dozen layers, the
+  // wrapped chips grew to three rows and covered the top third of the map.
   return (
-    <View style={styles.row}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.row}
+      keyboardShouldPersistTaps="handled">
       {LAYER_ORDER.map(key => {
         const on = visibility[key];
         // Built out here rather than inline: the swatch colour is data, and the
@@ -40,12 +46,13 @@ export function LayerToggle({visibility, onToggle}: Props) {
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  // Vertical padding so the chips' shadows are not clipped by the scroll view.
+  row: {flexDirection: 'row', gap: 8, paddingVertical: 4, paddingRight: 8},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

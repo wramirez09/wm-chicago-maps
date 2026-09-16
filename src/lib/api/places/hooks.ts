@@ -57,11 +57,12 @@ export function useBusinessOwners(accountNumber: string | null) {
   });
 }
 
-export function useCommunityAreas() {
+export function useCommunityAreas(options: {enabled?: boolean} = {}) {
   return useQuery({
     queryKey: placesKeys.communityAreas(),
     queryFn: ({signal}) => fetchCommunityAreas({signal}),
     staleTime: STALE_TIME.static,
+    enabled: options.enabled ?? true,
   });
 }
 

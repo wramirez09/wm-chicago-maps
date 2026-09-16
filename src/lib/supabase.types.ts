@@ -129,8 +129,6 @@ export type Database = {
           area_number: string;
           name: string;
           geom: Json | null;
-          wikipedia_extract: string | null;
-          wikipedia_url: string | null;
           image_url: string | null;
           updated_at: string;
         };
@@ -139,16 +137,12 @@ export type Database = {
           area_number: string;
           name: string;
           geom?: Json | null;
-          wikipedia_extract?: string | null;
-          wikipedia_url?: string | null;
           image_url?: string | null;
           updated_at?: string;
         };
         Update: Partial<{
           name: string;
           geom: Json | null;
-          wikipedia_extract: string | null;
-          wikipedia_url: string | null;
           image_url: string | null;
           updated_at: string;
         }>;

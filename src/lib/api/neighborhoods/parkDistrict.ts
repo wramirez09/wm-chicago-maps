@@ -12,6 +12,7 @@
  * boolean feature columns (`playground`, `pool_indoo`, `dog_friend`, …), each
  * holding a count as a string.
  */
+import {toIntegerString} from '../parse';
 import {andWhere, socrataQuery} from '../places/socrata';
 import type {LocalEvent} from '../events/ticketmaster';
 
@@ -43,13 +44,15 @@ export async function fetchParkEventPermits(
   query: ParkEventQuery = {},
 ): Promise<LocalEvent[]> {
   const from = query.from ?? new Date();
+  // Callers often hold the parks dataset's "2.0"; permits store "2".
+  const parkNumber = toIntegerString(query.parkNumber);
 
   const rows = await socrataQuery<ParkEventPermitRow>({
     datasetId: PARK_EVENT_PERMITS_DATASET,
     where: andWhere(
       `reservation_start_date >= '${isoDate(from)}'`,
       query.to ? `reservation_start_date <= '${isoDate(query.to)}'` : undefined,
-      query.parkNumber ? `park_number = '${query.parkNumber}'` : undefined,
+      parkNumber ? `park_number = '${parkNumber}'` : undefined,
       // Cancelled and pending permits are not events anyone can attend.
       "upper(permit_status) = 'APPROVED'",
     ),
@@ -66,9 +69,14 @@ export async function fetchParkFacilities(
   parkNumber: string,
   options: {signal?: AbortSignal} = {},
 ): Promise<string[]> {
+  const normalized = toIntegerString(parkNumber);
+  if (!normalized) {
+    return [];
+  }
+
   const rows = await socrataQuery<Record<string, string>>({
     datasetId: PARKS_DATASET,
-    where: `park_no = '${parkNumber.replace(/'/g, "''")}'`,
+    where: `park_no = '${normalized}'`,
     limit: 1,
     signal: options.signal,
   });

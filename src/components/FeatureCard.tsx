@@ -1,7 +1,7 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {NeighborhoodSummary} from './NeighborhoodSummary';
+import {type LiveDetail, SelectionDetails} from './SelectionDetails';
 
 /** Whatever the user last tapped on the map, flattened for display. */
 export type MapSelection = {
@@ -11,16 +11,20 @@ export type MapSelection = {
   accent: string;
   /** Extra facts, one per line — dock counts, licence type, address. */
   details?: string[];
-  /** A community area to pull a Wikipedia summary for. */
-  neighborhood?: string;
+  /** Where the feature is, so the card can offer walking directions to it. */
+  coordinates?: [number, number];
+  /** Which live feed to load for this feature, if any. */
+  live?: LiveDetail;
 };
 
 type Props = {
   selection: MapSelection;
   onDismiss: () => void;
+  /** Rendered under the details — MapScreen supplies the directions action. */
+  footer?: React.ReactNode;
 };
 
-export function FeatureCard({selection, onDismiss}: Props) {
+export function FeatureCard({selection, onDismiss, footer}: Props) {
   return (
     <View style={styles.card}>
       <View style={[styles.swatch, {backgroundColor: selection.accent}]} />
@@ -34,9 +38,8 @@ export function FeatureCard({selection, onDismiss}: Props) {
             {line}
           </Text>
         ))}
-        {selection.neighborhood ? (
-          <NeighborhoodSummary neighborhood={selection.neighborhood} />
-        ) : null}
+        {selection.live ? <SelectionDetails detail={selection.live} /> : null}
+        {footer}
       </View>
       <Pressable
         onPress={onDismiss}
@@ -52,8 +55,8 @@ export function FeatureCard({selection, onDismiss}: Props) {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    // Top-aligned now that the card can grow; centred looked wrong once a
-    // Wikipedia paragraph pushed it to several lines.
+    // Top-aligned now that the card can grow; centred looked wrong once live
+    // details pushed it to several lines.
     alignItems: 'flex-start',
     gap: 12,
     backgroundColor: '#ffffff',

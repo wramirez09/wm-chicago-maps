@@ -8,13 +8,18 @@
 import {useQuery} from '@tanstack/react-query';
 
 import {STALE_TIME} from '../../query';
+import type {BBox} from '../places/socrata';
+import {fetchBusStops} from './busStops';
 import {fetchBusPredictions, fetchBusVehicles} from './ctaBus';
+import {fetchCtaStations} from './ctaStations';
 import {fetchTrainArrivals, type TrainArrivalsQuery} from './ctaTrain';
 import {fetchDivvyStations, fetchStationStatus} from './divvyGbfs';
 import {fetchMetraTripUpdates, fetchMetraVehiclePositions} from './metra';
 import {fetchIsochrone, fetchRoute, type IsochroneOptions, type LngLat, type TravelMode} from './valhalla';
 
 export const transitKeys = {
+  ctaStations: () => ['transit', 'cta', 'stations'] as const,
+  busStops: (bbox: BBox) => ['transit', 'cta', 'busStops', bbox] as const,
   trainArrivals: (query: Omit<TrainArrivalsQuery, 'signal'>) =>
     ['transit', 'cta', 'train', query] as const,
   busPredictions: (stopIds: (string | number)[], route?: string) =>
@@ -137,5 +142,24 @@ export function useIsochrone(
     queryFn: ({signal}) => fetchIsochrone(center!, {...options, mode, minutes, signal}),
     staleTime: STALE_TIME.static,
     enabled: Boolean(center),
+  });
+}
+
+/** CTA's own station list — static, used to resolve a tapped station's mapid. */
+export function useCtaStations(options: {enabled?: boolean} = {}) {
+  return useQuery({
+    queryKey: transitKeys.ctaStations(),
+    queryFn: ({signal}) => fetchCtaStations({signal}),
+    staleTime: STALE_TIME.static,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useBusStops(bbox: BBox | null, options: {enabled?: boolean} = {}) {
+  return useQuery({
+    queryKey: transitKeys.busStops(bbox ?? [0, 0, 0, 0]),
+    queryFn: ({signal}) => fetchBusStops(bbox!, {signal}),
+    staleTime: STALE_TIME.static,
+    enabled: (options.enabled ?? true) && bbox !== null,
   });
 }

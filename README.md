@@ -154,7 +154,6 @@ hooks in each group's `hooks.ts`.
 | Google Business Profile | Owner-consented listing sync | `GBP_CLIENT_ID`/`GBP_CLIENT_SECRET` | **Edge Function** |
 | Chicago boundaries | Wards, parks, landmarks, ZIPs (GeoJSON) | reuses Socrata | On-device |
 | Chicago Park District | Outdoor event permits, park facilities | reuses Socrata | On-device |
-| Wikipedia / Wikidata | Community-area summary + lead image | none | On-device |
 | CTA Train Tracker | 'L' arrivals by mapid/stpid | `CTA_TRAIN_KEY` | On-device |
 | CTA Bus Tracker v2 | Bus predictions, live vehicles | `CTA_BUS_KEY` | On-device |
 | CTA GTFS static | Stops/routes → `transit_stops` | none | Ingest script |

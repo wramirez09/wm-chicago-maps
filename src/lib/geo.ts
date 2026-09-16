@@ -64,3 +64,48 @@ export function roundCoordinate(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
+
+/**
+ * Decode a Google-style encoded polyline to [lng, lat] pairs.
+ *
+ * Valhalla encodes at precision 6 (1e6), not the precision 5 that Google and
+ * most polyline libraries default to. Decoding a Valhalla shape at precision 5
+ * does not fail — it produces a route ten times too large, somewhere in the
+ * Atlantic — so the precision is explicit rather than defaulted.
+ *
+ * Spec: https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+ */
+/* eslint-disable no-bitwise -- the polyline format is defined in bit shifts */
+export function decodePolyline(encoded: string, precision = 6): [number, number][] {
+  const factor = 10 ** precision;
+  const coordinates: [number, number][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    for (const axis of [0, 1]) {
+      let shift = 0;
+      let result = 0;
+      let byte: number;
+
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 0) {
+        lat += delta;
+      } else {
+        lng += delta;
+      }
+    }
+
+    coordinates.push([lng / factor, lat / factor]);
+  }
+
+  return coordinates;
+}
+/* eslint-enable no-bitwise */

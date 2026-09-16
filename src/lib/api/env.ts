@@ -47,3 +47,11 @@ export function requireEnv(key: EnvKey): string {
   }
   return value;
 }
+
+/**
+ * Whether a key is configured, for UI that should explain a missing key
+ * instead of attempting a request that `requireEnv` would reject.
+ */
+export function hasEnv(key: EnvKey): boolean {
+  return env(key) !== undefined;
+}

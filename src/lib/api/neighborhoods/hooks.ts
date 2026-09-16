@@ -1,8 +1,8 @@
 /**
  * TanStack Query hooks for the neighborhoods clients.
  *
- * Boundaries and Wikipedia summaries are both effectively frozen, so these all
- * use the 24h `static` staleTime. The park permit feed is the one exception —
+ * Boundaries are effectively frozen, so these all use the 24h `static`
+ * staleTime. The park permit feed is the one exception —
  * a booking can be added at any time — but a day is still fine for a list that
  * is filtered to future dates.
  */
@@ -16,11 +16,6 @@ import {
   fetchZipBoundaries,
 } from './boundaries';
 import {fetchParkEventPermits, fetchParkFacilities, type ParkEventQuery} from './parkDistrict';
-import {
-  communityAreaTitle,
-  fetchWikidataEntity,
-  fetchWikipediaSummary,
-} from './wikipedia';
 
 export const neighborhoodKeys = {
   wards: () => ['neighborhoods', 'wards'] as const,
@@ -31,31 +26,32 @@ export const neighborhoodKeys = {
     ['neighborhoods', 'parkEvents', query] as const,
   parkFacilities: (parkNumber: string) =>
     ['neighborhoods', 'parkFacilities', parkNumber] as const,
-  wikipedia: (title: string) => ['neighborhoods', 'wikipedia', title] as const,
-  wikidata: (entityId: string) => ['neighborhoods', 'wikidata', entityId] as const,
 };
 
-export function useWardBoundaries() {
+export function useWardBoundaries(options: {enabled?: boolean} = {}) {
   return useQuery({
     queryKey: neighborhoodKeys.wards(),
     queryFn: ({signal}) => fetchWardBoundaries({signal}),
     staleTime: STALE_TIME.static,
+    enabled: options.enabled ?? true,
   });
 }
 
-export function useParkBoundaries() {
+export function useParkBoundaries(options: {enabled?: boolean} = {}) {
   return useQuery({
     queryKey: neighborhoodKeys.parks(),
     queryFn: ({signal}) => fetchParkBoundaries({signal}),
     staleTime: STALE_TIME.static,
+    enabled: options.enabled ?? true,
   });
 }
 
-export function useZipBoundaries() {
+export function useZipBoundaries(options: {enabled?: boolean} = {}) {
   return useQuery({
     queryKey: neighborhoodKeys.zips(),
     queryFn: ({signal}) => fetchZipBoundaries({signal}),
     staleTime: STALE_TIME.static,
+    enabled: options.enabled ?? true,
   });
 }
 
@@ -81,34 +77,5 @@ export function useParkFacilities(parkNumber: string | null) {
     queryFn: ({signal}) => fetchParkFacilities(parkNumber!, {signal}),
     staleTime: STALE_TIME.static,
     enabled: Boolean(parkNumber),
-  });
-}
-
-/**
- * Pass a community-area name ("Lincoln Park") and the ", Chicago" qualifier is
- * added, or pass an explicit article title to override that.
- */
-export function useNeighborhoodSummary(
-  communityArea: string | null,
-  options: {articleTitle?: string} = {},
-) {
-  const title =
-    options.articleTitle ??
-    (communityArea ? communityAreaTitle(communityArea) : '');
-
-  return useQuery({
-    queryKey: neighborhoodKeys.wikipedia(title),
-    queryFn: ({signal}) => fetchWikipediaSummary(title, {signal}),
-    staleTime: STALE_TIME.static,
-    enabled: title.length > 0,
-  });
-}
-
-export function useWikidataEntity(entityId: string | null) {
-  return useQuery({
-    queryKey: neighborhoodKeys.wikidata(entityId ?? ''),
-    queryFn: ({signal}) => fetchWikidataEntity(entityId!, {signal}),
-    staleTime: STALE_TIME.static,
-    enabled: Boolean(entityId),
   });
 }
