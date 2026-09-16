@@ -1,0 +1,101 @@
+import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
+import React from 'react';
+
+import {FONT_BOLD, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
+import {EXPRESSWAYS} from '../../data/expressways';
+import type {OverlayPressHandler} from './types';
+
+export const EXPRESSWAY_ACCENT = '#1d4ed8';
+
+const SOURCE_ID = 'expressways';
+
+type Props = {
+  visible: boolean;
+  onPress: OverlayPressHandler;
+};
+
+export function ExpresswayOverlay({visible, onPress}: Props) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <GeoJSONSource id={SOURCE_ID} data={EXPRESSWAYS} onPress={onPress}>
+      {/* Dark casing under a bright core, so the route still reads where it
+          runs over the basemap's own motorway ribbon. */}
+      <Layer
+        id="expressways-casing"
+        type="line"
+        source={SOURCE_ID}
+        beforeId={LABEL_ANCHOR_LAYER_ID}
+        layout={{'line-cap': 'round', 'line-join': 'round'}}
+        paint={{
+          'line-color': '#0b1e4d',
+          'line-width': [
+            'interpolate',
+            ['exponential', 1.5],
+            ['zoom'],
+            9,
+            4,
+            14,
+            11,
+            18,
+            26,
+          ],
+          'line-opacity': 0.9,
+        }}
+      />
+      <Layer
+        id="expressways-line"
+        type="line"
+        source={SOURCE_ID}
+        beforeId={LABEL_ANCHOR_LAYER_ID}
+        layout={{'line-cap': 'round', 'line-join': 'round'}}
+        paint={{
+          'line-color': [
+            'match',
+            ['get', 'kind'],
+            'motorway',
+            EXPRESSWAY_ACCENT,
+            '#60a5fa',
+          ],
+          'line-width': [
+            'interpolate',
+            ['exponential', 1.5],
+            ['zoom'],
+            9,
+            2,
+            14,
+            7,
+            18,
+            18,
+          ],
+        }}
+      />
+      {/* Route number riding along the line — the local name (Kennedy, Dan
+          Ryan, ...) is what the tap card shows. */}
+      <Layer
+        id="expressways-shield"
+        type="symbol"
+        source={SOURCE_ID}
+        beforeId={LABEL_ANCHOR_LAYER_ID}
+        minzoom={10}
+        filter={['!=', ['get', 'ref'], '']}
+        layout={{
+          'text-field': ['get', 'ref'],
+          'text-font': FONT_BOLD,
+          'text-size': 11,
+          'symbol-placement': 'line',
+          'symbol-spacing': 220,
+          'text-rotation-alignment': 'viewport',
+          'text-pitch-alignment': 'viewport',
+        }}
+        paint={{
+          'text-color': '#ffffff',
+          'text-halo-color': '#0b1e4d',
+          'text-halo-width': 1.8,
+        }}
+      />
+    </GeoJSONSource>
+  );
+}

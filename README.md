@@ -1,2 +1,120 @@
 # wm-chicago-maps
-mobile mapping app
+
+A bare React Native app (no Expo) rendering a MapLibre map of Chicago.
+
+- **Map:** [`@maplibre/maplibre-react-native`](https://github.com/maplibre/maplibre-react-native) v11
+- **Basemap:** [OpenFreeMap](https://openfreemap.org) "Liberty" — a full
+  OpenMapTiles/OSM basemap with street, highway and place detail. Free, no API
+  key. See [Swapping the basemap](#swapping-the-basemap).
+- **Overlays:** Chicago expressways, arterial streets and the CTA 'L' network,
+  each toggleable and tappable. See [Map data](#map-data).
+
+## Requirements
+
+- Node **22.11+** (`package.json` declares this engine; the repo currently
+  installs fine on Node 20 but React Native 0.87 does not support it)
+- Ruby + Bundler, Xcode, and a JDK **17** for Android
+  (`JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home` —
+  newer JDKs are not supported by the Gradle/AGP versions here)
+
+## Setup
+
+```sh
+npm install
+(cd ios && bundle install && bundle exec pod install)
+```
+
+`ios/Podfile` calls `$MLRN.post_install(installer)`. That hook is what pulls
+in the MapLibre native SDK as a Swift Package; without it the pod's sources
+fail with `'MapLibre/MapLibre.h' file not found`. Keep it if you regenerate
+the Podfile.
+
+## Run
+
+```sh
+npm start          # Metro
+npm run ios
+npm run android
+```
+
+## Checks
+
+```sh
+npm run lint
+npx tsc --noEmit
+npm test
+```
+
+## Layout
+
+| Path | What it is |
+| --- | --- |
+| `App.tsx` | Root component: safe-area provider + `MapScreen` |
+| `src/config/map.ts` | Style URL, fontstacks, label anchor, center/bounds, zoom limits |
+| `src/data/landmarks.ts` | Hand-written GeoJSON points |
+| `src/data/expressways.ts` | **Generated** — motorway/trunk lines from OSM |
+| `src/data/arterials.ts` | **Generated** — named primary/secondary streets from OSM |
+| `src/data/transit.ts` | **Generated** — CTA 'L' lines and stations from OSM |
+| `scripts/fetch-*.mjs` | Regenerate the three datasets from the Overpass API |
+| `src/components/MapScreen.tsx` | Map, camera, overlay wiring, tap handling |
+| `src/components/overlays/` | One component per data layer (source + style layers) |
+| `src/components/LayerToggle.tsx` | Chips that show/hide each overlay |
+| `src/components/FeatureCard.tsx` | Bottom card shown when a feature is tapped |
+| `__mocks__/@maplibre/` | Jest mock — MapLibre is native and can't render in Jest |
+
+## Map data
+
+The three overlay datasets are generated, not hand-maintained. Each script
+queries the [Overpass API](https://overpass-api.de) for the Chicago bounding
+box, simplifies the geometry (Douglas-Peucker) and writes a typed TS module:
+
+```sh
+node scripts/fetch-expressways.mjs
+node scripts/fetch-arterials.mjs
+node scripts/fetch-transit.mjs
+```
+
+The output is committed so the app needs no network at build time. Re-run a
+script when the data goes stale; do not edit `src/data/*.ts` by hand.
+
+Overlay data is © OpenStreetMap contributors, licensed
+[ODbL](https://opendatacommons.org/licenses/odbl/). The app surfaces this
+through MapLibre's built-in attribution control — keep it visible.
+
+### Adding an overlay
+
+1. Write (or generate) `src/data/<thing>.ts` exporting a typed
+   `FeatureCollection`.
+2. Add `src/components/overlays/<Thing>Overlay.tsx`: a `GeoJSONSource` plus its
+   style `Layer`s, exporting a `<THING>_ACCENT` colour.
+3. Register it in `LayerToggle.tsx`'s `LAYERS` array and render it in
+   `MapScreen.tsx` with a `selectFeature` describer.
+
+Overlay layers pass `beforeId={LABEL_ANCHOR_LAYER_ID}` so they draw above the
+basemap's roads but below its labels. Landmarks deliberately omit it and sit on
+top of everything.
+
+## Swapping the basemap
+
+`MAP_STYLE_URL` in `src/config/map.ts` points at OpenFreeMap Liberty. To use
+another provider (MapTiler, Stadia, a self-hosted Protomaps basemap), two other
+constants in that file have to move with it:
+
+- `FONT_REGULAR` / `FONT_BOLD` — the style's glyph server only serves the
+  fontstacks it was built with. Liberty serves **Noto Sans** only; a symbol
+  layer asking for anything else (including the style-spec default,
+  `Open Sans Regular`) renders **no text at all, with no error**.
+- `LABEL_ANCHOR_LAYER_ID` — the basemap layer our overlays insert themselves
+  before. Wrong id and the overlays paint over the place names.
+
+For a keyed provider, read the key from the environment (e.g. via
+`react-native-config`) rather than committing it.
+
+## Showing the user's location
+
+`UserLocation` / `Camera trackUserLocation` are not wired up yet. They need
+platform permissions first:
+
+- iOS — `NSLocationWhenInUseUsageDescription` in `ios/WmChicagoMaps/Info.plist`
+- Android — `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` in
+  `android/app/src/main/AndroidManifest.xml`, requested at runtime
