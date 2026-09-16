@@ -1,0 +1,78 @@
+{
+  "data": {
+    "stations": [
+      {
+        "station_id": "2232759736070696510",
+        "name": "Damen Ave & Ogden Ave",
+        "short_name": "CHI02349",
+        "lon": -87.67662,
+        "lat": 41.87317,
+        "capacity": 15,
+        "rental_uris": {
+          "android": "https://chi.lft.to/lastmile_qr_scan",
+          "ios": "https://chi.lft.to/lastmile_qr_scan"
+        },
+        "rental_methods": [
+          "KEY",
+          "CREDITCARD",
+          "TRANSITCARD"
+        ],
+        "has_kiosk": true,
+        "station_type": "classic",
+        "external_id": "2232759736070696510",
+        "electric_bike_surcharge_waiver": false,
+        "eightd_station_services": [],
+        "eightd_has_key_dispenser": false
+      },
+      {
+        "station_id": "1934289944388426278",
+        "name": "Fairfield Ave & 44th St",
+        "short_name": "CHI01790",
+        "lon": -87.6932272,
+        "lat": 41.813617,
+        "capacity": 7,
+        "rental_uris": {
+          "android": "https://chi.lft.to/lastmile_qr_scan",
+          "ios": "https://chi.lft.to/lastmile_qr_scan"
+        },
+        "rental_methods": [
+          "KEY",
+          "CREDITCARD",
+          "TRANSITCARD"
+        ],
+        "has_kiosk": false,
+        "station_type": "classic",
+        "external_id": "1934289944388426278",
+        "electric_bike_surcharge_waiver": false,
+        "eightd_station_services": [],
+        "eightd_has_key_dispenser": false
+      },
+      {
+        "station_id": "1991508150894459550",
+        "name": "State St & 111th St",
+        "short_name": "CHI01941",
+        "lon": -87.6226484,
+        "lat": 41.6926464,
+        "capacity": 8,
+        "rental_uris": {
+          "android": "https://chi.lft.to/lastmile_qr_scan",
+          "ios": "https://chi.lft.to/lastmile_qr_scan"
+        },
+        "rental_methods": [
+          "KEY",
+          "CREDITCARD",
+          "TRANSITCARD"
+        ],
+        "has_kiosk": false,
+        "station_type": "classic",
+        "external_id": "1991508150894459550",
+        "electric_bike_surcharge_waiver": false,
+        "eightd_station_services": [],
+        "eightd_has_key_dispenser": false
+      }
+    ]
+  },
+  "last_updated": 1789580856,
+  "ttl": 60,
+  "version": "1.1"
+}

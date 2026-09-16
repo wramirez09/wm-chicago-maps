@@ -1,0 +1,36 @@
+{
+  "events": [
+    {
+      "id": "987654321",
+      "name": {
+        "text": "Pilsen Open Studios"
+      },
+      "url": "https://www.eventbrite.com/e/987654321",
+      "start": {
+        "utc": "2026-10-10T17:00:00Z",
+        "local": "2026-10-10T12:00:00",
+        "timezone": "America/Chicago"
+      },
+      "logo": {
+        "url": "https://img.evbuc.com/thumb.jpg",
+        "original": {
+          "url": "https://img.evbuc.com/original.jpg"
+        }
+      },
+      "venue": {
+        "name": "Thalia Hall",
+        "address": {
+          "localized_address_display": "1807 S Allport St, Chicago, IL 60608",
+          "latitude": "41.8567",
+          "longitude": "-87.6564"
+        }
+      },
+      "status": "live"
+    }
+  ],
+  "pagination": {
+    "page_number": 1,
+    "page_count": 1,
+    "has_more_items": false
+  }
+}

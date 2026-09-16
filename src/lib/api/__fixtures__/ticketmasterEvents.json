@@ -1,0 +1,73 @@
+{
+  "_embedded": {
+    "events": [
+      {
+        "id": "G5vYZ9i1kAbCd",
+        "name": "Chicago Symphony Orchestra",
+        "url": "https://www.ticketmaster.com/event/G5vYZ9i1kAbCd",
+        "dates": {
+          "start": {
+            "dateTime": "2026-10-02T00:30:00Z",
+            "localDate": "2026-10-01",
+            "localTime": "19:30:00"
+          },
+          "timezone": "America/Chicago",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "images": [
+          {
+            "url": "https://s1.ticketm.net/small.jpg",
+            "width": 100,
+            "height": 50,
+            "ratio": "2_1"
+          },
+          {
+            "url": "https://s1.ticketm.net/large.jpg",
+            "width": 2048,
+            "height": 1152,
+            "ratio": "16_9"
+          }
+        ],
+        "classifications": [
+          {
+            "segment": {
+              "name": "Music"
+            },
+            "genre": {
+              "name": "Classical"
+            }
+          }
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "name": "Symphony Center",
+              "address": {
+                "line1": "220 S Michigan Ave"
+              },
+              "city": {
+                "name": "Chicago"
+              },
+              "state": {
+                "stateCode": "IL"
+              },
+              "postalCode": "60604",
+              "location": {
+                "latitude": "41.8789",
+                "longitude": "-87.6245"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "page": {
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1,
+    "number": 0
+  }
+}

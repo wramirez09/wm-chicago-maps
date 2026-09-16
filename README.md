@@ -43,9 +43,11 @@ npm run android
 
 ```sh
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm test
 ```
+
+Note: this project uses **npm** (`package-lock.json`), not yarn or pnpm.
 
 ## Layout
 
@@ -65,7 +67,13 @@ npm test
 | `src/search/searchIndex.ts` | Builds and queries the offline search index |
 | `src/config/layers.ts` | Layer keys, accent colours, labels, focus zooms |
 | `src/components/FeatureCard.tsx` | Bottom card shown when a feature is tapped |
+| `src/lib/api/` | API clients, one file per service, grouped |
+| `src/lib/api/http.ts` | The only `fetch` wrapper: timeout, retry, typed errors |
+| `src/lib/device/` | Location and push wrappers |
+| `supabase/functions/` | Edge Functions for credentials that can't ship |
+| `scripts/ingest/` | Bulk data loaders, run with tsx |
 | `__mocks__/@maplibre/` | Jest mock — MapLibre is native and can't render in Jest |
+| `__mocks__/react-native-config.js` | Jest mock — env is inlined at native build time |
 
 ## Map data
 
@@ -127,6 +135,78 @@ that means a geocoder (Nominatim and Photon are free; both have usage policies,
 and Nominatim requires a real User-Agent). Wire one in as a second result
 source behind `searchLocations`, merging its hits into the same `SearchResult`
 shape — the UI needs no change.
+
+## API integrations
+
+Clients live in `src/lib/api/<group>/<service>.ts`, one file per service, named
+exports only. Every one of them goes through `src/lib/api/http.ts` — a single
+`fetchJson` with an AbortController timeout, one retry on 5xx/network, JSON
+parsing and a typed `ApiError`. Read-only calls are wrapped in TanStack Query
+hooks in each group's `hooks.ts`.
+
+| Service | Purpose | Key from | Runs |
+| --- | --- | --- | --- |
+| Chicago Data Portal (Socrata) | Business licences, owners, community areas | `SOCRATA_APP_TOKEN` (optional, public) | On-device |
+| Cook County Assessor | Parcel lookup by PIN/address; owner-occupancy signal | none | On-device |
+| Photon | Geocode / reverse geocode, bbox-locked to Chicago | `PHOTON_URL` (self-hosted) | On-device |
+| Overture Maps Places | Bulk POI extract → `places_raw` | none | Ingest script |
+| OpenStreetMap Overpass | POI diff source | none | Ingest script |
+| Google Business Profile | Owner-consented listing sync | `GBP_CLIENT_ID`/`GBP_CLIENT_SECRET` | **Edge Function** |
+| Chicago boundaries | Wards, parks, landmarks, ZIPs (GeoJSON) | reuses Socrata | On-device |
+| Chicago Park District | Outdoor event permits, park facilities | reuses Socrata | On-device |
+| Wikipedia / Wikidata | Community-area summary + lead image | none | On-device |
+| CTA Train Tracker | 'L' arrivals by mapid/stpid | `CTA_TRAIN_KEY` | On-device |
+| CTA Bus Tracker v2 | Bus predictions, live vehicles | `CTA_BUS_KEY` | On-device |
+| CTA GTFS static | Stops/routes → `transit_stops` | none | Ingest script |
+| Divvy GBFS | Station information + live status | none | On-device |
+| Metra GTFS-RT | Vehicle positions, trip updates (protobuf) | `METRA_KEY`/`METRA_SECRET` | On-device |
+| Valhalla | Routing + isochrones | `VALHALLA_URL` (self-hosted) | On-device |
+| Ticketmaster Discovery | Events by lat/long + radius | `TICKETMASTER_KEY` | On-device |
+| Bandsintown | Concerts by location | `BANDSINTOWN_APP_ID` | On-device |
+| Eventbrite | Organiser-owned events only | `EVENTBRITE_TOKEN` | **Edge Function** |
+| Open-Meteo | Current conditions for the events feed | none | On-device |
+| Sentry / PostHog | Crash reporting, product analytics | `SENTRY_DSN`, `POSTHOG_API_KEY` | On-device (not installed) |
+
+### Where keys live
+
+`react-native-config` inlines `.env` at **native build** time, so changing a
+value needs a rebuild — a Metro reload will not pick it up. Everything in
+`.env` ships inside the app bundle and must be treated as public.
+
+Three things never go there:
+
+- `EVENTBRITE_TOKEN`, `GBP_CLIENT_SECRET` → `supabase secrets set …`. The app
+  calls the Edge Function; the function calls the vendor.
+- `SUPABASE_SERVICE_ROLE_KEY` → `scripts/.env` (gitignored). It bypasses RLS
+  and is only used by the ingest scripts.
+
+The Socrata app token is the deliberate exception: it is a public throttling
+identifier, not a credential, and Socrata expects it in client requests.
+
+### Cache policy
+
+`staleTime` is set per data class in `src/lib/query.ts`: static datasets 24h,
+live arrivals 30s, GBFS 60s, weather 10m. `fetchJson` already retries once, so
+the QueryClient sets `retry: false` — otherwise one failure becomes four
+requests.
+
+### Ingest scripts
+
+Bulk downloads run under `tsx` on a workstation, not in the app:
+
+```sh
+npm run ingest:overture     # needs `pipx install overturemaps`
+npm run ingest:overpass
+npm run ingest:gtfs-cta
+```
+
+### Tests
+
+One Jest test per client, each replaying a fixture from
+`src/lib/api/__fixtures__/` against a mocked `fetch`. No test touches the
+network. Fixtures for the keyless APIs are recorded from live responses; those
+for key-gated APIs (CTA, Ticketmaster, Bandsintown, Eventbrite) are built from
+the published response shapes.
 
 ## Swapping the basemap
 

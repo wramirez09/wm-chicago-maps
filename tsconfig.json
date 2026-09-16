@@ -1,17 +1,13 @@
 {
-  "compilerOptions": {
-    "jsx": "react"
-  },
-  "compilerOptions": {
-    "jsx": "react"
-  },
   "extends": "@react-native/typescript-config",
-  "include": [
-    "**/*.ts",
-    "**/*.tsx"
-  ],
+  "compilerOptions": {
+    "jsx": "react"
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
   "exclude": [
     "**/node_modules",
-    "**/Pods"
+    "**/Pods",
+    "supabase/functions",
+    "scripts"
   ]
 }
