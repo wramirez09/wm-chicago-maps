@@ -5,8 +5,18 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
+# react-native-permissions compiles in one handler per permission, and only
+# the ones listed here. A permission that is not in this list fails at runtime
+# with "handler unavailable" even though the JS call looks correct.
+# Keep this in sync with src/lib/device/location.ts.
+require_relative '../node_modules/react-native-permissions/scripts/setup'
+
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
+
+setup_permissions([
+  'LocationWhenInUse',
+])
 
 linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil

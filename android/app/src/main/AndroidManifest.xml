@@ -2,6 +2,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Both are runtime permissions on API 23+, requested from
+         src/lib/device/location.ts. COARSE is declared alongside FINE because
+         Android 12+ lets the user grant only approximate location; asking for
+         FINE without also declaring COARSE means that choice denies outright. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
