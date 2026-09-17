@@ -6,11 +6,11 @@
  * from the vendored copy, the app fails loudly at the boundary instead of
  * rendering undefined fields three components later.
  */
-import {ErrorResponse} from '@wm/shared';
+import {ErrorResponse, TokenPair} from '@wm/shared';
 import type {z} from 'zod';
 
-import {getAccessToken} from './auth';
 import {API_URL, REQUEST_TIMEOUT_MS} from './config';
+import {clearTokens, getAccessToken, getRefreshToken, setTokens} from './tokens';
 
 export class ApiError extends Error {
   /** HTTP status, or 0 when no response arrived (timeout, offline). */
@@ -61,10 +61,72 @@ export function buildUrl(path: string, query?: Query): string {
 }
 
 /**
- * Sends one request and returns the raw outcome. Non-2xx responses (other
- * than 304) throw ApiError carrying the backend's statusCode and message.
+ * Sends a request and returns the raw outcome. Non-2xx responses (other than
+ * 304) throw ApiError carrying the backend's statusCode and message.
+ *
+ * A 401 on an authenticated request refreshes the session once and retries
+ * the request once. If the retry is also 401, or the refresh fails, the error
+ * propagates: one retry, then it gives up.
  */
 export async function apiFetch(path: string, options: RequestOptions = {}): Promise<RawResponse> {
+  try {
+    return await send(path, options);
+  } catch (error) {
+    const unauthorized = error instanceof ApiError && error.statusCode === 401;
+    if (unauthorized && !options.anonymous && getRefreshToken() && (await refreshSession())) {
+      return send(path, options);
+    }
+    throw error;
+  }
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+/**
+ * Exchanges the refresh token for a new pair. Resolves true on success.
+ *
+ * Single-flight, and it has to be: the backend ROTATES refresh tokens, revoking
+ * the old one on use. If two requests hit 401 together and each refreshed, the
+ * first would rotate the token and the second would present a revoked one,
+ * fail, and sign the user out for no reason. Concurrent callers share one
+ * refresh instead.
+ */
+export function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+async function performRefresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return false;
+  }
+
+  try {
+    const {json} = await send('/v1/auth/refresh', {
+      method: 'POST',
+      body: {refreshToken},
+      anonymous: true,
+    });
+    setTokens(TokenPair.parse(json));
+    return true;
+  } catch (error) {
+    // A 4xx means the refresh token is revoked, expired or unknown: the
+    // session is over, so drop it. A network failure or 5xx is transient;
+    // keep the tokens so a later request can try again.
+    if (error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500) {
+      clearTokens();
+    }
+    return false;
+  }
+}
+
+/** One attempt, no refresh. */
+async function send(path: string, options: RequestOptions): Promise<RawResponse> {
   const url = buildUrl(path, options.query);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
