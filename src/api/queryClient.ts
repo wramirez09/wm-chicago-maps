@@ -6,13 +6,14 @@
  * show them as current.
  */
 import {createAsyncStoragePersister} from '@tanstack/query-async-storage-persister';
-import {type Query, QueryClient} from '@tanstack/react-query';
+import {hashKey, type Query, QueryClient} from '@tanstack/react-query';
 import type {
   PersistedClient,
   PersistQueryClientOptions,
   Persister,
 } from '@tanstack/react-query-persist-client';
 
+import {CHICAGO_BOUNDS} from '../config/map';
 import {persisterStorage} from './storage';
 
 const MINUTE = 60 * 1000;
@@ -43,6 +44,23 @@ export const PERSIST_MAX_AGE = 30 * DAY;
  * from the next write; the hooks for these roots set that.
  */
 const PERSISTED_ROOTS = new Set(['layers', 'areas']);
+
+/**
+ * The citywide landmark query: what MapScreen loads at launch and search
+ * reads. Persisted so landmarks draw offline, like the layers do. Only this
+ * key, not every places query: those are keyed by viewport, and persisting
+ * each pan's result would grow the cache for data that goes stale in a
+ * minute. Must match apiKeys.places(CHICAGO_BOUNDS, 'landmark').
+ */
+const CITYWIDE_LANDMARKS_HASH = hashKey(['places', CHICAGO_BOUNDS, 'landmark']);
+
+export function shouldPersistQuery(query: Pick<Query, 'queryKey' | 'queryHash' | 'state'>): boolean {
+  return (
+    query.state.status === 'success' &&
+    (PERSISTED_ROOTS.has(String(query.queryKey[0])) ||
+      query.queryHash === CITYWIDE_LANDMARKS_HASH)
+  );
+}
 
 /**
  * Bumped whenever the vendored @wm/shared schemas change shape, so a cache
@@ -112,8 +130,6 @@ export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
   maxAge: PERSIST_MAX_AGE,
   buster: CACHE_BUSTER,
   dehydrateOptions: {
-    shouldDehydrateQuery: (query: Query) =>
-      query.state.status === 'success' &&
-      PERSISTED_ROOTS.has(String(query.queryKey[0])),
+    shouldDehydrateQuery: shouldPersistQuery,
   },
 };

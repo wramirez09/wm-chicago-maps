@@ -162,6 +162,16 @@ export function MapScreen() {
     [],
   );
   const landmarks = usePlaces(placesBbox, 'landmark');
+  // Places are keyed by viewport, so a pan starts a *new* query. React Query
+  // keeps data on a failed refetch of the same key, but a new key that fails
+  // (offline, API down) has no data at all, and the landmarks would vanish
+  // on the first significant pan. Keep drawing the last successful collection
+  // instead.
+  const lastLandmarks = useRef(landmarks.data);
+  if (landmarks.data) {
+    lastLandmarks.current = landmarks.data;
+  }
+  const landmarkData = landmarks.data ?? lastLandmarks.current;
 
   // Boundary polygons are fetched only while their layer is on.
   const communityAreas = useAreas({enabled: visibility.neighborhoods});
@@ -554,7 +564,7 @@ export function MapScreen() {
           />
           <LandmarkOverlay
             visible={visibility.landmarks}
-            data={landmarks.data}
+            data={landmarkData}
             onPress={selectFeature<PlaceSummary>('landmarks', p => ({
               title: p.name,
               // Native feature properties drop null values, so a missing

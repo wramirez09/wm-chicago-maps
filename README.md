@@ -83,6 +83,8 @@ Note: this project uses **npm** (`package-lock.json`), not yarn or pnpm.
 | `src/api/hooks.ts` | TanStack Query hooks: layers, places, areas, events, Divvy, arrivals |
 | `src/api/queryClient.ts` | Stale times and on-disk persistence of layers and areas |
 | `src/api/storage.ts` | MMKV stores (auth, cache) |
+| `src/api/auth.ts`, `src/api/tokens.ts` | Session: native sign-in, refresh, sign-out; tokens in MMKV (no UI yet) |
+| `src/api/route.ts` | Walking directions from `/v1/route` |
 | `src/api/schema/` | **Vendored** `@wm/shared` — the backend's zod contract; do not edit |
 | `src/api/types.ts` | TypeScript types inferred from the contract |
 | `src/config/map.ts` | Style URL, fontstacks, label anchor, zoom limits |
@@ -188,7 +190,12 @@ not installed as a package: npm cannot install a subdirectory of a git repo (it
 ignores `&path:` and installs the whole monorepo under another name), and the
 package depends on pnpm `workspace:` packages. An `@wm/shared` alias in
 `metro.config.js`, `tsconfig.json` and `jest.config.js` keeps imports reading as
-the package name. To update: copy the files again, drop the `.js` suffix from
+the package name.
+
+**Restart Metro after pulling this change** (or any `metro.config.js` change).
+Metro reads its config only at startup; a dev server started before the alias
+existed fails with `Unable to resolve module @wm/shared` even though
+`npx react-native bundle` (which starts a fresh Metro) builds fine. To update: copy the files again, drop the `.js` suffix from
 relative imports (Metro does not map `./common.js` to `common.ts`), and bump
 `CACHE_BUSTER` in `src/api/queryClient.ts` so old cached data is discarded.
 
@@ -214,6 +221,17 @@ its endpoint exists.
 | Parks, wards, bus stops layers | Boundary / stop layers |
 | Businesses, ownership | Places ingested from licences |
 | Metra positions | Metra support (`/v1/transit/arrivals` answers "not implemented") |
+
+### Auth
+
+The backend owns auth. `src/api/auth.ts` sends a provider identity token to
+`POST /v1/auth/native` and stores the returned JWT pair; the client attaches
+the access token and, on a 401, refreshes once and retries once. Refresh is
+single-flight because the backend rotates refresh tokens — two concurrent
+refreshes would present a revoked token and sign the user out. There is no
+sign-in UI yet; obtaining an identity token needs
+`@invertase/react-native-apple-authentication` or
+`@react-native-google-signin/google-signin`.
 
 ### Tests
 
