@@ -53,13 +53,14 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from '../config/map';
-import type {ArterialProperties} from '../data/arterials';
-import type {ExpresswayProperties} from '../data/expressways';
-import type {LandmarkProperties} from '../data/landmarks';
+import {useLayer} from '../api/hooks';
 import type {
+  ArterialProperties,
+  ExpresswayProperties,
   TransitLineProperties,
   TransitStationProperties,
-} from '../data/transit';
+} from '../api/types';
+import type {LandmarkProperties} from '../data/landmarks';
 import {hasEnv} from '../lib/api/env';
 import {useParkBoundaries, useWardBoundaries} from '../lib/api/neighborhoods/hooks';
 import type {BusinessLicense} from '../lib/api/places/businessLicenses';
@@ -136,6 +137,14 @@ export function MapScreen() {
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
+
+  // Overlay collections from the API. Each is persisted to disk and revalidated
+  // with its ETag, so after the first launch they render from cache at once —
+  // including when the API is unreachable. A failed refetch keeps `data`.
+  const expressways = useLayer('expressways');
+  const arterials = useLayer('arterials');
+  const transitLines = useLayer('transit-lines');
+  const transitStations = useLayer('transit-stations');
 
   // Boundary polygons are fetched only while their layer is on.
   const communityAreas = useCommunityAreas({enabled: visibility.neighborhoods});
@@ -531,6 +540,7 @@ export function MapScreen() {
               arterials sit under expressways, which sit under transit. */}
           <ArterialOverlay
             visible={visibility.arterials}
+            data={arterials.data}
             onPress={selectFeature<ArterialProperties>('arterials', p => ({
               title: p.name,
               subtitle: p.kind === 'primary' ? 'Major street' : 'Street',
@@ -538,6 +548,7 @@ export function MapScreen() {
           />
           <ExpresswayOverlay
             visible={visibility.expressways}
+            data={expressways.data}
             onPress={selectFeature<ExpresswayProperties>('expressways', p => ({
               title: p.localName || p.name || p.ref,
               subtitle: [p.ref, p.localName ? p.name : '']
@@ -547,6 +558,8 @@ export function MapScreen() {
           />
           <TransitOverlay
             visible={visibility.transit}
+            lines={transitLines.data}
+            stations={transitStations.data}
             onPress={selectFeature<
               TransitLineProperties | TransitStationProperties
             >('transit', (p, center) =>

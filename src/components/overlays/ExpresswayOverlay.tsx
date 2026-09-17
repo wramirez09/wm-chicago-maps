@@ -3,23 +3,34 @@ import React from 'react';
 
 import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_BOLD, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
-import {EXPRESSWAYS} from '../../data/expressways';
+import type {ExpresswayCollection} from '../../api/types';
+import {EMPTY_COLLECTION} from '../../lib/geo';
 import type {OverlayPressHandler} from './types';
 
 const SOURCE_ID = 'expressways';
 
 type Props = {
   visible: boolean;
+  /** From useLayer('expressways'); undefined while loading. */
+  data: ExpresswayCollection | undefined;
   onPress: OverlayPressHandler;
 };
 
-export function ExpresswayOverlay({visible, onPress}: Props) {
+/**
+ * While the layer is still loading, the source mounts with an empty collection
+ * rather than rendering nothing. Each Layer is inserted just below
+ * LABEL_ANCHOR_LAYER_ID at mount time, so mount order is draw order: if this
+ * overlay only mounted once its data arrived, whichever layer the network
+ * returned last would draw on top. Mounting empty keeps the declared order
+ * (arterials < expressways < transit) no matter which request finishes first.
+ */
+export function ExpresswayOverlay({visible, data, onPress}: Props) {
   if (!visible) {
     return null;
   }
 
   return (
-    <GeoJSONSource id={SOURCE_ID} data={EXPRESSWAYS} onPress={onPress}>
+    <GeoJSONSource id={SOURCE_ID} data={data ?? EMPTY_COLLECTION} onPress={onPress}>
       {/* Dark casing under a bright core, so the route still reads where it
           runs over the basemap's own motorway ribbon. */}
       <Layer

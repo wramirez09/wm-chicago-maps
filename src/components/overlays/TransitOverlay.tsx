@@ -2,7 +2,8 @@ import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
 import React from 'react';
 
 import {FONT_REGULAR, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
-import {TRANSIT_LINES, TRANSIT_STATIONS} from '../../data/transit';
+import type {TransitLineCollection, TransitStationCollection} from '../../api/types';
+import {EMPTY_COLLECTION} from '../../lib/geo';
 import type {OverlayPressHandler} from './types';
 
 const LINE_SOURCE_ID = 'transit-lines';
@@ -10,10 +11,15 @@ const STATION_SOURCE_ID = 'transit-stations';
 
 type Props = {
   visible: boolean;
+  /** From useLayer('transit-lines'); undefined while loading. */
+  lines: TransitLineCollection | undefined;
+  /** From useLayer('transit-stations'); undefined while loading. */
+  stations: TransitStationCollection | undefined;
   onPress: OverlayPressHandler;
 };
 
-export function TransitOverlay({visible, onPress}: Props) {
+/** Mounts with empty collections while loading; see ExpresswayOverlay. */
+export function TransitOverlay({visible, lines, stations, onPress}: Props) {
   if (!visible) {
     return null;
   }
@@ -22,7 +28,7 @@ export function TransitOverlay({visible, onPress}: Props) {
     <>
       <GeoJSONSource
         id={LINE_SOURCE_ID}
-        data={TRANSIT_LINES}
+        data={lines ?? EMPTY_COLLECTION}
         onPress={onPress}>
         <Layer
           id="transit-lines-casing"
@@ -67,7 +73,7 @@ export function TransitOverlay({visible, onPress}: Props) {
 
       <GeoJSONSource
         id={STATION_SOURCE_ID}
-        data={TRANSIT_STATIONS}
+        data={stations ?? EMPTY_COLLECTION}
         onPress={onPress}>
         <Layer
           id="transit-stations-circle"

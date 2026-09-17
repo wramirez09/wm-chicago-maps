@@ -3,23 +3,27 @@ import React from 'react';
 
 import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_REGULAR, LABEL_ANCHOR_LAYER_ID} from '../../config/map';
-import {ARTERIALS} from '../../data/arterials';
+import type {ArterialCollection} from '../../api/types';
+import {EMPTY_COLLECTION} from '../../lib/geo';
 import type {OverlayPressHandler} from './types';
 
 const SOURCE_ID = 'arterials';
 
 type Props = {
   visible: boolean;
+  /** From useLayer('arterials'); undefined while loading. */
+  data: ArterialCollection | undefined;
   onPress: OverlayPressHandler;
 };
 
-export function ArterialOverlay({visible, onPress}: Props) {
+/** Mounts with an empty collection while loading; see ExpresswayOverlay. */
+export function ArterialOverlay({visible, data, onPress}: Props) {
   if (!visible) {
     return null;
   }
 
   return (
-    <GeoJSONSource id={SOURCE_ID} data={ARTERIALS} onPress={onPress}>
+    <GeoJSONSource id={SOURCE_ID} data={data ?? EMPTY_COLLECTION} onPress={onPress}>
       <Layer
         id="arterials-line"
         type="line"
