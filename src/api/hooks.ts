@@ -1,0 +1,183 @@
+/**
+ * TanStack Query hooks over the API. Stale times: layers and areas 24 h,
+ * places and Divvy 60 s, arrivals 30 s.
+ */
+import {
+  AreaCollection,
+  AreaDetail,
+  ArrivalsQuery,
+  Arrivals,
+  ArterialCollection,
+  DivvyStations,
+  ExpresswayCollection,
+  LayerIndex,
+  type LayerKey,
+  PlaceCategory,
+  PlaceCollection,
+  PlaceDetail,
+  TransitLineCollection,
+  TransitStationCollection,
+} from '@wm/shared';
+import {type QueryClient, useQuery, useQueryClient} from '@tanstack/react-query';
+import type {z} from 'zod';
+
+import {apiFetch, apiRequest} from './client';
+import {PERSIST_MAX_AGE, STALE} from './queryClient';
+import {cacheStorage} from './storage';
+
+/** [west, south, east, north] */
+export type Bbox = readonly [number, number, number, number];
+
+type ArrivalsMode = z.input<typeof ArrivalsQuery>['mode'];
+
+export const apiKeys = {
+  layers: () => ['layers'] as const,
+  layer: (key: LayerKey) => ['layers', key] as const,
+  places: (bbox: Bbox | null, category?: z.infer<typeof PlaceCategory>) =>
+    ['places', bbox, category ?? null] as const,
+  place: (id: string) => ['place', id] as const,
+  areas: () => ['areas'] as const,
+  area: (slug: string) => ['areas', slug] as const,
+  divvy: () => ['divvy'] as const,
+  arrivals: (stop: string, mode: ArrivalsMode) => ['arrivals', mode ?? 'rail', stop] as const,
+};
+
+const LAYER_SCHEMAS = {
+  expressways: ExpresswayCollection,
+  arterials: ArterialCollection,
+  'transit-lines': TransitLineCollection,
+  'transit-stations': TransitStationCollection,
+} as const;
+
+export type LayerData<K extends LayerKey> = z.infer<(typeof LAYER_SCHEMAS)[K]>;
+
+const etagKey = (key: LayerKey) => `etag:layers:${key}`;
+
+/**
+ * GET /v1/layers/:key with ETag revalidation.
+ *
+ * Only the ETag is stored separately. On 304 the body comes from the query
+ * cache — already persisted to disk — rather than a second copy of up to a
+ * megabyte kept alongside it.
+ */
+export async function fetchLayer<K extends LayerKey>(
+  key: K,
+  queryClient: QueryClient,
+  signal?: AbortSignal,
+): Promise<LayerData<K>> {
+  const path = `/v1/layers/${key}`;
+  const cached = queryClient.getQueryData<LayerData<K>>(apiKeys.layer(key));
+  // No cached body means nothing to fall back on, so a conditional request
+  // could only produce a 304 we cannot use.
+  const etag = cached ? cacheStorage.getString(etagKey(key)) : undefined;
+
+  let response = await apiFetch(path, {etag, signal});
+
+  if (response.status === 304) {
+    if (cached) {
+      return cached;
+    }
+    response = await apiFetch(path, {signal});
+  }
+
+  const data = LAYER_SCHEMAS[key].parse(response.json) as LayerData<K>;
+
+  if (response.etag) {
+    cacheStorage.set(etagKey(key), response.etag);
+  } else {
+    cacheStorage.remove(etagKey(key));
+  }
+
+  return data;
+}
+
+type Enabled = {enabled?: boolean};
+
+export function useLayer<K extends LayerKey>(key: K, options: Enabled = {}) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: apiKeys.layer(key),
+    queryFn: ({signal}) => fetchLayer(key, queryClient, signal),
+    staleTime: STALE.layers,
+    gcTime: PERSIST_MAX_AGE,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useLayers() {
+  return useQuery({
+    queryKey: apiKeys.layers(),
+    queryFn: ({signal}) => apiRequest('/v1/layers', LayerIndex, {signal}),
+    staleTime: STALE.layers,
+  });
+}
+
+export function usePlaces(
+  bbox: Bbox | null,
+  category?: z.infer<typeof PlaceCategory>,
+  options: Enabled = {},
+) {
+  return useQuery({
+    queryKey: apiKeys.places(bbox, category),
+    queryFn: ({signal}) =>
+      apiRequest('/v1/places', PlaceCollection, {
+        query: {bbox: bbox!.join(','), category},
+        signal,
+      }),
+    staleTime: STALE.places,
+    enabled: (options.enabled ?? true) && bbox !== null,
+    // Keep the previous viewport's places on screen while the new ones load,
+    // instead of blanking the layer on every pan.
+    placeholderData: previous => previous,
+  });
+}
+
+export function usePlace(id: string | null) {
+  return useQuery({
+    queryKey: apiKeys.place(id ?? ''),
+    queryFn: ({signal}) => apiRequest(`/v1/places/${encodeURIComponent(id!)}`, PlaceDetail, {signal}),
+    staleTime: STALE.places,
+    enabled: Boolean(id),
+  });
+}
+
+export function useAreas(options: Enabled = {}) {
+  return useQuery({
+    queryKey: apiKeys.areas(),
+    queryFn: ({signal}) => apiRequest('/v1/areas', AreaCollection, {signal}),
+    staleTime: STALE.areas,
+    gcTime: PERSIST_MAX_AGE,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useArea(slug: string | null) {
+  return useQuery({
+    queryKey: apiKeys.area(slug ?? ''),
+    queryFn: ({signal}) => apiRequest(`/v1/areas/${encodeURIComponent(slug!)}`, AreaDetail, {signal}),
+    staleTime: STALE.areas,
+    gcTime: PERSIST_MAX_AGE,
+    enabled: Boolean(slug),
+  });
+}
+
+export function useDivvy(options: Enabled = {}) {
+  return useQuery({
+    queryKey: apiKeys.divvy(),
+    queryFn: ({signal}) => apiRequest('/v1/transit/divvy', DivvyStations, {signal}),
+    staleTime: STALE.divvy,
+    refetchInterval: STALE.divvy,
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function useArrivals(stop: string | null, mode: ArrivalsMode = 'rail', options: Enabled = {}) {
+  return useQuery({
+    queryKey: apiKeys.arrivals(stop ?? '', mode),
+    queryFn: ({signal}) =>
+      apiRequest('/v1/transit/arrivals', Arrivals, {query: {stop, mode}, signal}),
+    staleTime: STALE.arrivals,
+    refetchInterval: STALE.arrivals,
+    enabled: (options.enabled ?? true) && Boolean(stop),
+  });
+}

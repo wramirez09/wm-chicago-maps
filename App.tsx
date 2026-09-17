@@ -1,10 +1,10 @@
-import {QueryClientProvider} from '@tanstack/react-query';
+import {PersistQueryClientProvider} from '@tanstack/react-query-persist-client';
 import React, {useEffect, useState} from 'react';
 import {StatusBar, StyleSheet, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 import {MapScreen} from './src/components/MapScreen';
-import {createQueryClient} from './src/lib/query';
+import {createQueryClient, persistOptions} from './src/api/queryClient';
 import {initObservability} from './src/lib/observability';
 
 function App() {
@@ -18,14 +18,16 @@ function App() {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
+    // Restores layers and areas from disk before queries run, so the map draws
+    // cached overlays immediately — including when the API is unreachable.
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <SafeAreaProvider>
         <StatusBar barStyle="dark-content" />
         <View style={styles.root}>
           <MapScreen />
         </View>
       </SafeAreaProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 }
 

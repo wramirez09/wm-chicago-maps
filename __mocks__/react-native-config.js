@@ -9,6 +9,7 @@
 module.exports = {
   __esModule: true,
   default: {
+    API_URL: 'http://api.test',
     SUPABASE_URL: 'https://test.supabase.co',
     SUPABASE_ANON_KEY: 'test-anon-key',
     CTA_TRAIN_KEY: 'test-cta-train-key',

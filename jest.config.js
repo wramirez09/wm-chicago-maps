@@ -1,5 +1,9 @@
 module.exports = {
   preset: '@react-native/jest-preset',
+  // Vendored backend contract; see metro.config.js for why it is not a package.
+  moduleNameMapper: {
+    '^@wm/shared$': '<rootDir>/src/api/schema/index.ts',
+  },
   // Default testMatch collects everything under __tests__/, which swept up the
   // shared helper file and failed it for having no tests.
   testMatch: ['**/?(*.)+(spec|test).[jt]s?(x)'],
