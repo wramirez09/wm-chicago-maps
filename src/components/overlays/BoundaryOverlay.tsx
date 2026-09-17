@@ -7,7 +7,7 @@ import {EMPTY_COLLECTION} from '../../lib/geo';
 import type {OverlayPressHandler} from './types';
 
 type Props = {
-  layer: Extract<LayerKey, 'neighborhoods' | 'parks' | 'wards'>;
+  layer: Extract<LayerKey, 'neighborhoods'>;
   visible: boolean;
   data: GeoJSON.FeatureCollection | undefined;
   /** Property holding the display name, which differs per dataset. */
@@ -18,8 +18,9 @@ type Props = {
 };
 
 /**
- * Polygon boundaries from the Chicago Data Portal — community areas, parks,
- * wards. One component because the three differ only in data and colour.
+ * Polygon boundaries from the API — currently community areas (/v1/areas).
+ * Kept generic over its data and label field so further boundary layers can
+ * reuse it once the API serves them.
  *
  * The fill is nearly transparent on purpose: it exists to make the interior
  * tappable (a line layer is only tappable on its few-pixel stroke), not to tint
@@ -52,7 +53,7 @@ export function BoundaryOverlay({
         beforeId={LABEL_ANCHOR_LAYER_ID}
         paint={{
           'fill-color': accent,
-          'fill-opacity': layer === 'parks' ? 0.22 : 0.06,
+          'fill-opacity': 0.06,
         }}
       />
       <Layer

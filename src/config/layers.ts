@@ -12,13 +12,8 @@ export type LayerKey =
   | 'transit'
   | 'landmarks'
   | 'divvy'
-  | 'businesses'
-  | 'busStops'
-  | 'metra'
   | 'events'
-  | 'neighborhoods'
-  | 'parks'
-  | 'wards';
+  | 'neighborhoods';
 
 export type LayerVisibility = Record<LayerKey, boolean>;
 
@@ -29,13 +24,8 @@ export type LayerVisibility = Record<LayerKey, boolean>;
  */
 export const LIVE_LAYERS: LayerKey[] = [
   'divvy',
-  'businesses',
-  'busStops',
-  'metra',
   'events',
   'neighborhoods',
-  'parks',
-  'wards',
 ];
 
 export const LAYER_ACCENT: Record<LayerKey, string> = {
@@ -44,13 +34,8 @@ export const LAYER_ACCENT: Record<LayerKey, string> = {
   transit: '#0f766e',
   landmarks: '#e4572e',
   divvy: '#0b6bcb',
-  businesses: '#7c3aed',
-  busStops: '#0369a1',
-  metra: '#4338ca',
   events: '#db2777',
   neighborhoods: '#475569',
-  parks: '#15803d',
-  wards: '#a16207',
 };
 
 export const LAYER_LABEL: Record<LayerKey, string> = {
@@ -59,13 +44,8 @@ export const LAYER_LABEL: Record<LayerKey, string> = {
   transit: 'CTA rail',
   landmarks: 'Landmarks',
   divvy: 'Divvy',
-  businesses: 'Businesses',
-  busStops: 'Bus stops',
-  metra: 'Metra',
   events: 'Events',
   neighborhoods: 'Neighborhoods',
-  parks: 'Parks',
-  wards: 'Wards',
 };
 
 /** Draw order, and the order the toggle chips appear in. */
@@ -75,13 +55,8 @@ export const LAYER_ORDER: LayerKey[] = [
   'transit',
   'landmarks',
   'divvy',
-  'businesses',
-  'busStops',
-  'metra',
   'events',
   'neighborhoods',
-  'parks',
-  'wards',
 ];
 
 /** Zoom the camera eases to when a feature on this layer is tapped. */
@@ -91,11 +66,6 @@ export const FOCUS_ZOOM: Record<LayerKey, number> = {
   transit: 13,
   landmarks: 14,
   divvy: 16,
-  businesses: 17,
-  busStops: 17,
-  metra: 13,
   events: 15,
   neighborhoods: 12,
-  parks: 14,
-  wards: 12,
 };

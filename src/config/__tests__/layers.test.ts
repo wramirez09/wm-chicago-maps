@@ -38,8 +38,8 @@ describe('layer config', () => {
     }
   });
 
-  it('marks divvy and businesses as live layers, all of them known', () => {
-    expect(LIVE_LAYERS).toEqual(expect.arrayContaining(['divvy', 'businesses']));
+  it('marks the API-backed layers as live, all of them known', () => {
+    expect(LIVE_LAYERS).toEqual(expect.arrayContaining(['divvy', 'events', 'neighborhoods']));
     for (const key of LIVE_LAYERS) {
       expect(LAYER_ORDER).toContain(key);
     }

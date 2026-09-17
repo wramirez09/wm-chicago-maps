@@ -38,7 +38,6 @@
  *
  * 5. Replace the body of `messaging()` below with the real import.
  */
-import {supabase} from '../supabase';
 
 export class PushNotConfiguredError extends Error {
   constructor() {
@@ -82,30 +81,15 @@ export async function getPushToken(): Promise<string> {
 }
 
 /**
- * Registers this device's token against the signed-in user.
- *
- * Upserted on `token` so reinstalls and token refreshes replace the row rather
- * than accumulating dead tokens — the `devices` table needs a unique index on
- * `token` for this to work.
+ * Token registration is not implemented: the API has no device endpoint yet.
+ * When it does, POST the token there through src/api/client.ts; this used to
+ * write straight to a Supabase table, which the app no longer talks to.
  */
-export async function registerDeviceToken(token: string, platform: 'ios' | 'android') {
-  const client = supabase();
-  const {data: auth} = await client.auth.getUser();
-
-  const {error} = await client
-    .from('devices')
-    .upsert({token, platform, user_id: auth.user?.id ?? null, updated_at: new Date().toISOString()}, {onConflict: 'token'});
-
-  if (error) {
-    throw new Error(`Could not register device token: ${error.message}`);
-  }
-}
-
-/** Keeps Supabase in sync when FCM rotates the token. Returns unsubscribe. */
+/** Would keep the backend in sync when FCM rotates the token. Returns unsubscribe. */
 export function onPushTokenRefresh(_platform: 'ios' | 'android'): () => void {
   // Once Firebase is installed:
   //   return messaging().onTokenRefresh(token => {
-  //     registerDeviceToken(token, platform).catch(error => {
+  //     registerWithApi(token, platform).catch(error => {
   //       console.warn('[push] could not persist refreshed token', error);
   //     });
   //   });

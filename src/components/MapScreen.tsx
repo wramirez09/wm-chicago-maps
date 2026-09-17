@@ -7,7 +7,7 @@ import {
   UserLocation,
   type ViewStateChangeEvent,
 } from '@maplibre/maplibre-react-native';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   type GestureResponderEvent,
   type LayoutChangeEvent,
@@ -24,20 +24,12 @@ import {FeatureCard, type MapSelection} from './FeatureCard';
 import {LayerToggle} from './LayerToggle';
 import {LocateButton} from './LocateButton';
 import {SEARCH_FIELD_HEIGHT, SearchBar} from './SearchBar';
-import {WeatherChip} from './WeatherChip';
 import {ArterialOverlay} from './overlays/ArterialOverlay';
 import {BoundaryOverlay} from './overlays/BoundaryOverlay';
-import {BUSINESS_MIN_ZOOM, BusinessOverlay} from './overlays/BusinessOverlay';
-import {
-  BUS_STOP_MIN_ZOOM,
-  BusStopOverlay,
-  type BusStopFeatureProperties,
-} from './overlays/BusStopOverlay';
 import {DivvyOverlay} from './overlays/DivvyOverlay';
 import {EventOverlay, type EventFeatureProperties} from './overlays/EventOverlay';
 import {ExpresswayOverlay} from './overlays/ExpresswayOverlay';
 import {LandmarkOverlay} from './overlays/LandmarkOverlay';
-import {MetraOverlay} from './overlays/MetraOverlay';
 import {RouteOverlay} from './overlays/RouteOverlay';
 import {TransitOverlay} from './overlays/TransitOverlay';
 import {
@@ -65,12 +57,6 @@ import type {
   TransitLineProperties,
   TransitStationProperties,
 } from '../api/types';
-import {hasEnv} from '../lib/api/env';
-import {useParkBoundaries, useWardBoundaries} from '../lib/api/neighborhoods/hooks';
-import type {BusinessLicense} from '../lib/api/places/businessLicenses';
-import type {GeocodeResult} from '../lib/api/places/photon';
-import type {BBox} from '../lib/api/places/socrata';
-import type {MetraVehiclePosition} from '../lib/api/transit/metra';
 import {
   type Coordinates,
   getCurrentPosition,
@@ -80,8 +66,6 @@ import {
   bboxMovedSignificantly,
   isInsideBounds,
   roundBbox,
-  roundCoordinate,
-  snapBBox,
 } from '../lib/geo';
 import {
   isPanGesture,
@@ -110,13 +94,8 @@ const INITIAL_VISIBILITY: LayerVisibility = {
   // Live layers start off: turning one on is what makes its first request,
   // so the map still opens instantly and works offline.
   divvy: false,
-  businesses: false,
-  busStops: false,
-  metra: false,
   events: false,
   neighborhoods: false,
-  parks: false,
-  wards: false,
 };
 
 type PressEvent = NativeSyntheticEvent<PressEventWithFeatures>;
@@ -137,7 +116,7 @@ const INDEPENDENCE_LABEL: Record<Independence, string | null> = {
   excluded: null,
 };
 
-type Viewport = {bbox: BBox; zoom: number; center: [number, number]};
+type Viewport = {zoom: number; center: [number, number]};
 
 export function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -186,8 +165,6 @@ export function MapScreen() {
 
   // Boundary polygons are fetched only while their layer is on.
   const communityAreas = useAreas({enabled: visibility.neighborhoods});
-  const parks = useParkBoundaries({enabled: visibility.parks});
-  const wards = useWardBoundaries({enabled: visibility.wards});
 
   // Fires once per gesture, at rest — not per frame — so no debounce needed.
   // The bbox is snapped so small pans reuse cached viewport queries.
@@ -276,7 +253,7 @@ export function MapScreen() {
   const handleRegionDidChange = useCallback(
     (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
       const {bounds, zoom, center} = event.nativeEvent;
-      setViewport({bbox: snapBBox(bounds), zoom, center});
+      setViewport({zoom, center});
 
       if (placesTimer.current) {
         clearTimeout(placesTimer.current);
@@ -291,12 +268,6 @@ export function MapScreen() {
     [],
   );
 
-  // Rounded to ~11 km: at city scale, one weather/events lookup per session
-  // instead of one per pan.
-  const roundedCenter = useMemo(() => {
-    const [lng, lat] = viewport?.center ?? CHICAGO_CENTER;
-    return {latitude: roundCoordinate(lat), longitude: roundCoordinate(lng)};
-  }, [viewport?.center]);
 
   const toggleLayer = useCallback((key: LayerKey) => {
     setVisibility(current => ({...current, [key]: !current[key]}));
@@ -364,12 +335,6 @@ export function MapScreen() {
         subtitle: result.subtitle,
         accent: result.accent,
         coordinates: result.center,
-        // Same live section as tapping the station on the map; without this a
-        // station opened from search showed no arrivals at all.
-        live:
-          result.kind === 'station'
-            ? {kind: 'cta-station', coordinates: result.center}
-            : undefined,
       });
 
       cameraRef.current?.easeTo({
@@ -377,21 +342,6 @@ export function MapScreen() {
         zoom: result.zoom,
         duration: 600,
       });
-    },
-    [select, stopFollowing],
-  );
-
-  const handleSelectAddress = useCallback(
-    (result: GeocodeResult) => {
-      const center: [number, number] = [result.longitude, result.latitude];
-      stopFollowing();
-      select({
-        title: result.properties.name ?? result.label.split(',')[0],
-        subtitle: result.label,
-        accent: '#6b7280',
-        coordinates: center,
-      });
-      cameraRef.current?.easeTo({center, zoom: 17, duration: 600});
     },
     [select, stopFollowing],
   );
@@ -487,22 +437,9 @@ export function MapScreen() {
     setChipRowHeight(event.nativeEvent.layout.height);
   }, []);
 
-  const zoom = viewport?.zoom ?? CHICAGO_ZOOM;
   const hints: string[] = [];
   if (outsideChicago) {
     hints.push("You're outside Chicago, so the map stays on the city");
-  }
-  if (visibility.businesses && zoom < BUSINESS_MIN_ZOOM) {
-    hints.push('Zoom in to see businesses');
-  }
-  if (visibility.busStops && zoom < BUS_STOP_MIN_ZOOM) {
-    hints.push('Zoom in to see bus stops');
-  }
-  if (visibility.metra && !hasEnv('METRA_KEY')) {
-    hints.push('Metra needs METRA_KEY in .env, then a rebuild');
-  }
-  if (visibility.events && !hasEnv('TICKETMASTER_KEY') && !hasEnv('BANDSINTOWN_APP_ID')) {
-    hints.push('Events need TICKETMASTER_KEY or BANDSINTOWN_APP_ID in .env, then a rebuild');
   }
 
   return (
@@ -544,16 +481,6 @@ export function MapScreen() {
 
           {/* Boundaries first, so every other layer draws on top of them. */}
           <BoundaryOverlay
-            layer="wards"
-            visible={visibility.wards}
-            data={wards.data}
-            labelField="ward"
-            onPress={selectFeature<{ward?: string}>('wards', p => ({
-              title: `Ward ${p.ward ?? ''}`.trim(),
-              subtitle: 'City Council ward',
-            }))}
-          />
-          <BoundaryOverlay
             layer="neighborhoods"
             visible={visibility.neighborhoods}
             data={communityAreas.data}
@@ -562,21 +489,6 @@ export function MapScreen() {
               title: p.name,
               subtitle: `Community area ${p.number}`,
             }))}
-          />
-          <BoundaryOverlay
-            layer="parks"
-            visible={visibility.parks}
-            data={parks.data}
-            labelField="park"
-            labelMinZoom={13}
-            onPress={selectFeature<{park?: string; park_no?: string; acres?: string}>(
-              'parks',
-              p => ({
-                title: titleCase(p.park ?? 'Park'),
-                subtitle: p.acres ? `Park · ${Number(p.acres).toFixed(1)} acres` : 'Park',
-                live: p.park_no ? {kind: 'park', parkNumber: p.park_no} : undefined,
-              }),
-            )}
           />
 
           {/* Declaration order is draw order within each `beforeId` group:
@@ -605,48 +517,16 @@ export function MapScreen() {
             stations={transitStations.data}
             onPress={selectFeature<
               TransitLineProperties | TransitStationProperties
-            >('transit', (p, center) =>
+            >('transit', p =>
               'line' in p
                 ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
                 : {
                     title: p.name,
                     subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
-                    live: center ? {kind: 'cta-station', coordinates: center} : undefined,
                   },
             )}
           />
           <RouteOverlay route={route} />
-          <BusStopOverlay
-            visible={visibility.busStops}
-            bbox={viewport?.bbox ?? null}
-            zoom={zoom}
-            onPress={selectFeature<BusStopFeatureProperties>('busStops', p => ({
-              title: p.name,
-              subtitle: [p.direction, p.routes ? `Routes ${p.routes}` : '']
-                .filter(Boolean)
-                .join(' · '),
-              live: {kind: 'bus-stop', stopId: p.stopId},
-            }))}
-          />
-          <BusinessOverlay
-            visible={visibility.businesses}
-            bbox={viewport?.bbox ?? null}
-            zoom={zoom}
-            onPress={selectFeature<BusinessLicense>('businesses', p => ({
-              title: p.doing_business_as_name || p.legal_name || 'Business',
-              subtitle: p.business_activity || p.license_description || '',
-              details: [
-                p.address,
-                p.community_area_name
-                  ? `Community area: ${titleCase(p.community_area_name)}`
-                  : undefined,
-                p.expiration_date
-                  ? `Licence valid to ${p.expiration_date.slice(0, 10)}`
-                  : undefined,
-              ].filter((line): line is string => Boolean(line)),
-              live: {kind: 'business', accountNumber: p.account_number, address: p.address},
-            }))}
-          />
           <DivvyOverlay
             visible={visibility.divvy}
             onPress={selectFeature<DivvyStation>('divvy', p => ({
@@ -658,13 +538,6 @@ export function MapScreen() {
                 `${p.bikes} bikes available (${p.ebikes} e-bikes)`,
                 `${p.docks} open docks`,
               ],
-            }))}
-          />
-          <MetraOverlay
-            visible={visibility.metra}
-            onPress={selectFeature<Omit<MetraVehiclePosition, 'reportedAt'>>('metra', p => ({
-              title: p.routeId ? `Metra ${p.routeId}` : 'Metra train',
-              subtitle: p.tripId ? `Trip ${p.tripId}` : 'Live position',
             }))}
           />
           <EventOverlay
@@ -701,14 +574,10 @@ export function MapScreen() {
       <View
         style={[styles.topWrapper, {top: insets.top + EDGE}]}
         pointerEvents="box-none">
-        <SearchBar
-          onSelect={handleSearchSelect}
-          onSelectAddress={handleSelectAddress}
-        />
+        <SearchBar onSelect={handleSearchSelect} />
         <View onLayout={handleChipRowLayout}>
           <LayerToggle visibility={visibility} onToggle={toggleLayer} />
         </View>
-        <WeatherChip coordinates={roundedCenter} />
         {hints.map(hint => (
           <View key={hint} style={styles.hint}>
             <Text style={styles.hintText}>{hint}</Text>
@@ -785,11 +654,6 @@ function centerOf(geometry: GeoJSON.Geometry): [number, number] | null {
 function sourceLabel(source: string): string {
   const words = source.replace(/_/g, ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/** "ROGERS PARK" → "Rogers Park". The portal stores many names uppercased. */
-function titleCase(value: string): string {
-  return value.toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
 }
 
 const styles = StyleSheet.create({

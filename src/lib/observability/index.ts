@@ -39,7 +39,13 @@
  * Keep tracesSampleRate low: a map app emits a lot of spans, and the default of
  * 1.0 exhausts a free Sentry quota in days.
  */
-import {env} from '../api/env';
+import Config from 'react-native-config';
+
+/** Reads an optional key inlined by react-native-config; '' counts as unset. */
+function env(key: 'SENTRY_DSN' | 'POSTHOG_API_KEY'): string | undefined {
+  const value = (Config as Record<string, string | undefined>)[key];
+  return value ? value : undefined;
+}
 
 let initialised = false;
 
