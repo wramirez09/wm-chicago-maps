@@ -1,4 +1,5 @@
 import type {LngLat, LngLatBounds} from '@maplibre/maplibre-react-native';
+import {CHICAGO_BBOX, CHICAGO_CENTER as SHARED_CHICAGO_CENTER} from '@wm/shared';
 
 /**
  * OpenFreeMap's "Liberty" style: a full OpenMapTiles/OSM basemap with real
@@ -25,13 +26,21 @@ export const FONT_BOLD = ['Noto Sans Bold'];
  */
 export const LABEL_ANCHOR_LAYER_ID = 'waterway_line_label';
 
+/**
+ * Chicago's centre and bounds come from the backend contract, so the app's
+ * camera limits and the API's bbox clamping can never disagree.
+ *
+ * Spread into MapLibre's types rather than re-exported as-is: the shared
+ * constants are `as const` readonly tuples, which Camera's mutable
+ * LngLat/LngLatBounds props do not accept.
+ */
 /** The Loop, roughly. */
-export const CHICAGO_CENTER: LngLat = [-87.6298, 41.8781];
+export const CHICAGO_CENTER: LngLat = [...SHARED_CHICAGO_CENTER];
 
 export const CHICAGO_ZOOM = 11;
 
 /** [west, south, east, north] — city limits with a little breathing room. */
-export const CHICAGO_BOUNDS: LngLatBounds = [-87.94, 41.64, -87.52, 42.03];
+export const CHICAGO_BOUNDS: LngLatBounds = [...CHICAGO_BBOX];
 
 export const MIN_ZOOM = 9;
 export const MAX_ZOOM = 19;
