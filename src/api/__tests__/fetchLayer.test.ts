@@ -22,6 +22,11 @@ beforeEach(() => {
   cacheStorage.clearAll();
 });
 
+// setQueryData schedules each query's garbage-collection timer (gcTime, 5 min
+// by default). Left running, it keeps an in-band Jest process alive after the
+// run finishes, which hangs `jest <path>` locally and a single-worker CI job.
+afterEach(() => queryClient.clear());
+
 describe('fetchLayer', () => {
   it('fetches unconditionally the first time and stores the ETag', async () => {
     const {header, restore} = mockFetch([{body: ARTERIALS, headers: {ETag: '"v1"'}}]);
