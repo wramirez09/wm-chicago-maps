@@ -7,7 +7,11 @@
  */
 import {createAsyncStoragePersister} from '@tanstack/query-async-storage-persister';
 import {type Query, QueryClient} from '@tanstack/react-query';
-import type {PersistQueryClientOptions} from '@tanstack/react-query-persist-client';
+import type {
+  PersistedClient,
+  PersistQueryClientOptions,
+  Persister,
+} from '@tanstack/react-query-persist-client';
 
 import {persisterStorage} from './storage';
 
@@ -58,14 +62,51 @@ export function createQueryClient(): QueryClient {
   });
 }
 
+/**
+ * Skips a write when no persisted query changed since the last one.
+ *
+ * The persister is triggered by *every* query-cache event, not just events on
+ * persisted queries, and each write JSON-stringifies the whole persisted
+ * cache. With layers and areas that is ~5.5 MB, about 23 ms per stringify in
+ * Node/V8 and several times that under Hermes, which has no JIT. Unwrapped,
+ * the 60-second Divvy refresh and every map pan (a new places query) would
+ * re-serialize megabytes of unchanged layers on the JS thread. A persisted
+ * query only changes when its data is replaced, which bumps dataUpdatedAt,
+ * so comparing those is enough.
+ */
+export function skipUnchangedWrites(inner: Persister): Persister {
+  let lastSignature: string | undefined;
+
+  return {
+    persistClient: (client: PersistedClient) => {
+      const signature = client.clientState.queries
+        .map(query => `${query.queryHash}@${query.state.dataUpdatedAt}`)
+        .sort()
+        .join('|');
+
+      if (signature === lastSignature) {
+        return;
+      }
+      lastSignature = signature;
+      return inner.persistClient(client);
+    },
+    restoreClient: () => inner.restoreClient(),
+    removeClient: () => {
+      lastSignature = undefined;
+      return inner.removeClient();
+    },
+  };
+}
+
 export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
-  persister: createAsyncStoragePersister({
-    storage: persisterStorage,
-    key: 'wm.query-cache',
-    // The whole persisted cache is rewritten on each change; layers are large,
-    // so writes are coalesced.
-    throttleTime: 2000,
-  }),
+  persister: skipUnchangedWrites(
+    createAsyncStoragePersister({
+      storage: persisterStorage,
+      key: 'wm.query-cache',
+      // Coalesces bursts, e.g. four layers resolving within a second at launch.
+      throttleTime: 2000,
+    }),
+  ),
   maxAge: PERSIST_MAX_AGE,
   buster: CACHE_BUSTER,
   dehydrateOptions: {
