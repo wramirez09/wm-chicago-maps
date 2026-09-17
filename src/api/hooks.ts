@@ -1,5 +1,5 @@
 /**
- * TanStack Query hooks over the API. Stale times: layers and areas 24 h,
+ * TanStack Query hooks over the API. Stale times: layers, areas and geocode 24 h,
  * places and Divvy 60 s, arrivals 30 s.
  */
 import {
@@ -23,6 +23,7 @@ import {type QueryClient, useQuery, useQueryClient} from '@tanstack/react-query'
 import type {z} from 'zod';
 
 import {apiFetch, apiRequest} from './client';
+import {fetchGeocode, GEOCODE_MIN_LENGTH} from './geocode';
 import {PERSIST_MAX_AGE, STALE} from './queryClient';
 import {cacheStorage} from './storage';
 
@@ -42,6 +43,7 @@ export const apiKeys = {
   divvy: () => ['divvy'] as const,
   arrivals: (stop: string, mode: ArrivalsMode) => ['arrivals', mode ?? 'rail', stop] as const,
   events: (bbox: Bbox | null) => ['events', bbox] as const,
+  geocode: (query: string) => ['geocode', query] as const,
 };
 
 const LAYER_SCHEMAS = {
@@ -140,6 +142,23 @@ export function usePlace(id: string | null) {
     queryFn: ({signal}) => apiRequest(`/v1/places/${encodeURIComponent(id!)}`, PlaceDetail, {signal}),
     staleTime: STALE.places,
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Addresses and places for a search query. The caller debounces: this runs
+ * for whatever string it is given. Not persisted, and not retried — a failure
+ * means the endpoint or geocoder is down, and retrying per keystroke would
+ * only delay the "unavailable" message.
+ */
+export function useGeocode(query: string, options: Enabled = {}) {
+  const q = query.trim();
+  return useQuery({
+    queryKey: apiKeys.geocode(q),
+    queryFn: ({signal}) => fetchGeocode(q, {signal}),
+    staleTime: STALE.geocode,
+    retry: false,
+    enabled: (options.enabled ?? true) && q.length >= GEOCODE_MIN_LENGTH,
   });
 }
 

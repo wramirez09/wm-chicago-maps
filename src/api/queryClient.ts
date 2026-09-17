@@ -28,6 +28,8 @@ export const STALE = {
   arrivals: 30 * 1000,
   // Listings change over hours, not seconds.
   events: 5 * MINUTE,
+  // An address does not move; the same query answers the same way all day.
+  geocode: DAY,
 } as const;
 
 /**

@@ -46,6 +46,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from '../config/map';
+import type {GeocodeResult} from '../api/geocode';
 import {type Bbox, useAreas, useLayer, usePlaces} from '../api/hooks';
 import {fetchWalkingRoute} from '../api/route';
 import type {
@@ -356,6 +357,20 @@ export function MapScreen() {
     [select, stopFollowing],
   );
 
+  const handleSelectAddress = useCallback(
+    (result: GeocodeResult) => {
+      stopFollowing();
+      select({
+        title: result.title,
+        subtitle: result.subtitle,
+        accent: '#6b7280',
+        coordinates: result.center,
+      });
+      cameraRef.current?.easeTo({center: result.center, zoom: 17, duration: 600});
+    },
+    [select, stopFollowing],
+  );
+
   /**
    * Off → follow. Ease in first, then hand the camera to native tracking.
    * Tracking keeps whatever zoom the map has and jumps rather than animates,
@@ -584,7 +599,7 @@ export function MapScreen() {
       <View
         style={[styles.topWrapper, {top: insets.top + EDGE}]}
         pointerEvents="box-none">
-        <SearchBar onSelect={handleSearchSelect} />
+        <SearchBar onSelect={handleSearchSelect} onSelectAddress={handleSelectAddress} />
         <View onLayout={handleChipRowLayout}>
           <LayerToggle visibility={visibility} onToggle={toggleLayer} />
         </View>

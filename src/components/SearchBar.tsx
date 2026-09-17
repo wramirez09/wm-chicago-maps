@@ -1,5 +1,6 @@
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   Keyboard,
   Pressable,
   ScrollView,
@@ -9,7 +10,8 @@ import {
   View,
 } from 'react-native';
 
-import {useLayer, usePlaces} from '../api/hooks';
+import {GEOCODE_MIN_LENGTH, type GeocodeResult} from '../api/geocode';
+import {useGeocode, useLayer, usePlaces} from '../api/hooks';
 import {CHICAGO_BOUNDS} from '../config/map';
 import {
   buildSearchIndex,
@@ -22,11 +24,22 @@ import {
 /** Height of the search field itself, excluding the results dropdown. */
 export const SEARCH_FIELD_HEIGHT = 44;
 
+/**
+ * Geocoding is a round trip per request, so it waits for a pause in typing.
+ * Local results are synchronous and stay instant.
+ */
+const GEOCODE_DEBOUNCE_MS = 300;
+
+/** Local results are capped lower when addresses are also showing. */
+const LOCAL_LIMIT = 8;
+const LOCAL_LIMIT_WITH_ADDRESSES = 5;
+
 type Props = {
   onSelect: (result: SearchResult) => void;
+  onSelectAddress: (result: GeocodeResult) => void;
 };
 
-export function SearchBar({onSelect}: Props) {
+export function SearchBar({onSelect, onSelectAddress}: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   // `TextInput` as a type is the props type in RN 0.87; the instance type (the
@@ -59,15 +72,26 @@ export function SearchBar({onSelect}: Props) {
   // replaced it), never per keystroke. Searching the built index is
   // sub-millisecond, so there is nothing to debounce.
   const indexCache = useRef<{sources: SearchSources; index: SearchIndex} | null>(null);
-  const results = useMemo(() => {
+  const localResults = useMemo(() => {
     if (query.trim().length < 2) {
       return [];
     }
     if (indexCache.current?.sources !== sources) {
       indexCache.current = {sources, index: buildSearchIndex(sources)};
     }
-    return searchLocations(indexCache.current.index, query);
+    return searchLocations(indexCache.current.index, query, LOCAL_LIMIT);
   }, [query, sources]);
+
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), GEOCODE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const geocode = useGeocode(debouncedQuery, {enabled: focused});
+  const addresses = geocode.data ?? [];
+  const results =
+    addresses.length > 0 ? localResults.slice(0, LOCAL_LIMIT_WITH_ADDRESSES) : localResults;
 
   const clear = useCallback(() => {
     setQuery('');
@@ -90,7 +114,20 @@ export function SearchBar({onSelect}: Props) {
     [dismiss, onSelect],
   );
 
-  const open = focused && results.length > 0;
+  const handleSelectAddress = useCallback(
+    (result: GeocodeResult) => {
+      onSelectAddress(result);
+      dismiss();
+    },
+    [dismiss, onSelectAddress],
+  );
+
+  const trimmed = query.trim();
+  // Still waiting on the debounce or the request for what is typed now.
+  const lookingUp =
+    trimmed.length >= GEOCODE_MIN_LENGTH && (trimmed !== debouncedQuery || geocode.isFetching);
+  const searching = lookingUp && addresses.length === 0;
+  const open = focused && (results.length > 0 || addresses.length > 0 || searching);
 
   return (
     <View style={styles.wrapper}>
@@ -108,7 +145,13 @@ export function SearchBar({onSelect}: Props) {
           autoCorrect={false}
           autoCapitalize="words"
           clearButtonMode="never"
-          onSubmitEditing={() => results[0] && handleSelect(results[0])}
+          onSubmitEditing={() => {
+            if (results[0]) {
+              handleSelect(results[0]);
+            } else if (addresses[0]) {
+              handleSelectAddress(addresses[0]);
+            }
+          }}
           accessibilityLabel="Search the map"
         />
         {query.length > 0 ? (
@@ -145,15 +188,44 @@ export function SearchBar({onSelect}: Props) {
                 </View>
               </Pressable>
             ))}
+            {addresses.length > 0 ? (
+              <Text style={[styles.sectionLabel, results.length > 0 && styles.rowDivided]}>
+                Addresses
+              </Text>
+            ) : null}
+            {addresses.map((address, index) => (
+              <Pressable
+                key={address.id}
+                onPress={() => handleSelectAddress(address)}
+                style={[styles.row, (index > 0 || results.length === 0) && styles.rowDivided]}
+                accessibilityRole="button"
+                accessibilityLabel={`${address.title}, ${address.subtitle}`}>
+                <View style={[styles.swatch, styles.addressSwatch]} />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {address.title}
+                  </Text>
+                  <Text style={styles.rowSubtitle} numberOfLines={1}>
+                    {address.subtitle}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+            {searching ? (
+              <View style={[styles.searching, results.length > 0 && styles.rowDivided]}>
+                <ActivityIndicator size="small" color="#9ca3af" />
+              </View>
+            ) : null}
           </ScrollView>
         </View>
       ) : null}
 
-      {focused && query.trim().length >= 2 && results.length === 0 ? (
+      {focused && trimmed.length >= 2 && !open ? (
         <View style={styles.results}>
           <Text style={styles.empty}>
-            Nothing matching “{query.trim()}”. This searches the map's own
-            streets, stations and landmarks — not street addresses.
+            {geocode.isError && trimmed === debouncedQuery
+              ? `Nothing matching “${trimmed}” on the map. ${geocode.error.message}`
+              : `Nothing matching “${trimmed}”.`}
           </Text>
         </View>
       ) : null}
@@ -205,4 +277,16 @@ const styles = StyleSheet.create({
   rowTitle: {fontSize: 15, color: '#111827', fontWeight: '500'},
   rowSubtitle: {marginTop: 1, fontSize: 12, color: '#6b7280'},
   empty: {padding: 14, fontSize: 13, color: '#6b7280', lineHeight: 18},
+  sectionLabel: {
+    paddingTop: 10,
+    paddingBottom: 4,
+    paddingHorizontal: 12,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  addressSwatch: {backgroundColor: '#6b7280'},
+  searching: {paddingVertical: 10, alignItems: 'center'},
 });
