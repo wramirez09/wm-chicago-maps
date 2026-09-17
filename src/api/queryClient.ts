@@ -25,6 +25,8 @@ export const STALE = {
   places: MINUTE,
   divvy: MINUTE,
   arrivals: 30 * 1000,
+  // Listings change over hours, not seconds.
+  events: 5 * MINUTE,
 } as const;
 
 /**

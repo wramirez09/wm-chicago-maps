@@ -1,9 +1,7 @@
 import React from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {KeyHint} from './KeyHint';
-import {hasEnv} from '../lib/api/env';
-import type {RouteResult} from '../lib/api/transit/valhalla';
+import type {RouteResult} from '../api/types';
 
 type Props = {
   route: RouteResult | null;
@@ -15,15 +13,11 @@ type Props = {
 
 /** "Walk here" — routes from the user's location to the selected feature. */
 export function DirectionsAction({route, loading, error, onRequest, onClear}: Props) {
-  if (!hasEnv('VALHALLA_URL')) {
-    return <KeyHint feature="Walking directions" envKey="VALHALLA_URL" />;
-  }
-
   if (route) {
     return (
       <View style={styles.summary}>
         <Text style={styles.summaryText}>
-          🚶 {formatDuration(route.durationSeconds)} · {formatDistance(route.distanceKm)}
+          🚶 {formatDuration(route.durationSeconds)} · {formatDistance(route.distanceMeters)}
         </Text>
         <Pressable onPress={onClear} hitSlop={8} accessibilityRole="button">
           <Text style={styles.clear}>Clear</Text>
@@ -59,9 +53,9 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-/** Miles, because this is a Chicago app; Valhalla answers in kilometres. */
-function formatDistance(km: number): string {
-  const miles = km * 0.621371;
+/** Miles, because this is a Chicago app; the API answers in metres. */
+function formatDistance(meters: number): string {
+  const miles = meters / 1609.344;
   return miles < 0.1 ? `${Math.round(miles * 5280)} ft` : `${miles.toFixed(1)} mi`;
 }
 

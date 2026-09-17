@@ -9,6 +9,7 @@ import {
   Arrivals,
   ArterialCollection,
   DivvyStations,
+  EventCollection,
   ExpresswayCollection,
   LayerIndex,
   type LayerKey,
@@ -40,6 +41,7 @@ export const apiKeys = {
   area: (slug: string) => ['areas', slug] as const,
   divvy: () => ['divvy'] as const,
   arrivals: (stop: string, mode: ArrivalsMode) => ['arrivals', mode ?? 'rail', stop] as const,
+  events: (bbox: Bbox | null) => ['events', bbox] as const,
 };
 
 const LAYER_SCHEMAS = {
@@ -179,5 +181,21 @@ export function useArrivals(stop: string | null, mode: ArrivalsMode = 'rail', op
     staleTime: STALE.arrivals,
     refetchInterval: STALE.arrivals,
     enabled: (options.enabled ?? true) && Boolean(stop),
+  });
+}
+
+/**
+ * Events with a location inside the viewport. The backend merges its sources
+ * (owners, the Park District, ticketing partners, community submissions), so
+ * the app no longer talks to any of them directly.
+ */
+export function useEvents(bbox: Bbox | null, options: Enabled = {}) {
+  return useQuery({
+    queryKey: apiKeys.events(bbox),
+    queryFn: ({signal}) =>
+      apiRequest('/v1/events', EventCollection, {query: {bbox: bbox!.join(',')}, signal}),
+    staleTime: STALE.events,
+    enabled: (options.enabled ?? true) && bbox !== null,
+    placeholderData: previous => previous,
   });
 }

@@ -2,8 +2,7 @@ import {GeoJSONSource, Layer} from '@maplibre/maplibre-react-native';
 import React, {useMemo} from 'react';
 
 import {LABEL_ANCHOR_LAYER_ID} from '../../config/map';
-import type {RouteResult} from '../../lib/api/transit/valhalla';
-import {decodePolyline} from '../../lib/geo';
+import type {RouteResult} from '../../api/types';
 
 const SOURCE_ID = 'route';
 
@@ -11,16 +10,13 @@ type Props = {
   route: RouteResult | null;
 };
 
-/** The walking route from the user to the selected feature, from Valhalla. */
+/** The walking route from the user to the selected feature, from GET /v1/route. */
 export function RouteOverlay({route}: Props) {
+  // The API returns the route already decoded as a LineString.
   const collection = useMemo<GeoJSON.FeatureCollection<GeoJSON.LineString>>(
     () => ({
       type: 'FeatureCollection',
-      features: (route?.legs ?? []).map(leg => ({
-        type: 'Feature',
-        properties: {},
-        geometry: {type: 'LineString', coordinates: decodePolyline(leg.shape, 6)},
-      })),
+      features: route ? [{type: 'Feature', properties: {}, geometry: route.geometry}] : [],
     }),
     [route],
   );

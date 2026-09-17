@@ -6,6 +6,13 @@
  * generated data in src/data.
  */
 import type {
+  AreaSummary as AreaSummarySchema,
+  DivvyStation as DivvyStationSchema,
+  EventCollection as EventCollectionSchema,
+  EventSummary as EventSummarySchema,
+  RouteResult as RouteResultSchema,
+} from '@wm/shared';
+import type {
   ArterialCollection as ArterialCollectionSchema,
   ArterialProperties as ArterialPropertiesSchema,
   ExpresswayCollection as ExpresswayCollectionSchema,
@@ -26,3 +33,9 @@ export type ExpresswayCollection = z.infer<typeof ExpresswayCollectionSchema>;
 export type ArterialCollection = z.infer<typeof ArterialCollectionSchema>;
 export type TransitLineCollection = z.infer<typeof TransitLineCollectionSchema>;
 export type TransitStationCollection = z.infer<typeof TransitStationCollectionSchema>;
+
+export type AreaSummary = z.infer<typeof AreaSummarySchema>;
+export type DivvyStation = z.infer<typeof DivvyStationSchema>;
+export type EventSummary = z.infer<typeof EventSummarySchema>;
+export type EventCollection = z.infer<typeof EventCollectionSchema>;
+export type RouteResult = z.infer<typeof RouteResultSchema>;

@@ -54,22 +54,23 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from '../config/map';
-import {type Bbox, useLayer, usePlaces} from '../api/hooks';
+import {type Bbox, useAreas, useLayer, usePlaces} from '../api/hooks';
+import {fetchWalkingRoute} from '../api/route';
 import type {
+  AreaSummary,
   ArterialProperties,
+  DivvyStation,
   ExpresswayProperties,
+  RouteResult,
   TransitLineProperties,
   TransitStationProperties,
 } from '../api/types';
 import {hasEnv} from '../lib/api/env';
 import {useParkBoundaries, useWardBoundaries} from '../lib/api/neighborhoods/hooks';
 import type {BusinessLicense} from '../lib/api/places/businessLicenses';
-import {useCommunityAreas} from '../lib/api/places/hooks';
 import type {GeocodeResult} from '../lib/api/places/photon';
 import type {BBox} from '../lib/api/places/socrata';
-import type {DivvyStation} from '../lib/api/transit/divvyGbfs';
 import type {MetraVehiclePosition} from '../lib/api/transit/metra';
-import {fetchRoute, type RouteResult} from '../lib/api/transit/valhalla';
 import {
   type Coordinates,
   getCurrentPosition,
@@ -184,7 +185,7 @@ export function MapScreen() {
   const landmarks = usePlaces(placesBbox, 'landmark');
 
   // Boundary polygons are fetched only while their layer is on.
-  const communityAreas = useCommunityAreas({enabled: visibility.neighborhoods});
+  const communityAreas = useAreas({enabled: visibility.neighborhoods});
   const parks = useParkBoundaries({enabled: visibility.parks});
   const wards = useWardBoundaries({enabled: visibility.wards});
 
@@ -471,9 +472,7 @@ export function MapScreen() {
       }
 
       setRoute(
-        await fetchRoute([origin.longitude, origin.latitude], destination, {
-          mode: 'pedestrian',
-        }),
+        await fetchWalkingRoute([origin.longitude, origin.latitude], destination),
       );
     } catch (error) {
       setRouteError(error instanceof Error ? error.message : 'Could not get directions.');
@@ -558,14 +557,11 @@ export function MapScreen() {
             layer="neighborhoods"
             visible={visibility.neighborhoods}
             data={communityAreas.data}
-            labelField="community"
-            onPress={selectFeature<{community?: string; area_numbe?: string}>(
-              'neighborhoods',
-              p => ({
-                title: titleCase(p.community ?? 'Community area'),
-                subtitle: p.area_numbe ? `Community area ${p.area_numbe}` : 'Community area',
-              }),
-            )}
+            labelField="name"
+            onPress={selectFeature<AreaSummary>('neighborhoods', p => ({
+              title: p.name,
+              subtitle: `Community area ${p.number}`,
+            }))}
           />
           <BoundaryOverlay
             layer="parks"
@@ -655,12 +651,12 @@ export function MapScreen() {
             visible={visibility.divvy}
             onPress={selectFeature<DivvyStation>('divvy', p => ({
               title: p.name,
-              subtitle: p.isRenting
+              subtitle: p.renting
                 ? 'Divvy station · live'
                 : 'Divvy station · not renting',
               details: [
-                `${p.bikesAvailable} bikes available (${p.ebikesAvailable} e-bikes)`,
-                `${p.docksAvailable} open docks`,
+                `${p.bikes} bikes available (${p.ebikes} e-bikes)`,
+                `${p.docks} open docks`,
               ],
             }))}
           />
@@ -673,13 +669,13 @@ export function MapScreen() {
           />
           <EventOverlay
             visible={visibility.events}
-            center={roundedCenter}
+            bbox={placesBbox}
             onPress={selectFeature<EventFeatureProperties>('events', p => ({
               title: p.title,
-              subtitle: [p.venueName, p.category].filter(Boolean).join(' · '),
+              subtitle: [p.venueName, sourceLabel(p.source)].filter(Boolean).join(' · '),
               details: [
                 p.startsAt ? new Date(p.startsAt).toLocaleString() : undefined,
-                p.address ?? undefined,
+                p.free ? 'Free' : undefined,
               ].filter((line): line is string => Boolean(line)),
             }))}
           />
@@ -779,6 +775,16 @@ function centerOf(geometry: GeoJSON.Geometry): [number, number] | null {
   }
 
   return null;
+}
+
+/**
+ * "park_district" → "Park district". Derived from the value rather than a
+ * lookup table, so the app never spells out partner names and a new backend
+ * source still gets a sensible label.
+ */
+function sourceLabel(source: string): string {
+  const words = source.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** "ROGERS PARK" → "Rogers Park". The portal stores many names uppercased. */
