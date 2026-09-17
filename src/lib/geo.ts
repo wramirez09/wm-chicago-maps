@@ -109,3 +109,17 @@ export function decodePolyline(encoded: string, precision = 6): [number, number]
   return coordinates;
 }
 /* eslint-enable no-bitwise */
+
+/**
+ * Whether a point lies inside [west, south, east, north].
+ *
+ * Used to refuse following a user who is outside Chicago: native location
+ * tracking moves the camera to the user and does not respect the Camera's
+ * maxBounds, so following someone in San Francisco drags a Chicago map there.
+ */
+export function isInsideBounds(
+  [longitude, latitude]: [number, number],
+  [west, south, east, north]: readonly [number, number, number, number],
+): boolean {
+  return longitude >= west && longitude <= east && latitude >= south && latitude <= north;
+}

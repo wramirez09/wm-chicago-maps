@@ -9,7 +9,7 @@
  * exceed what is comfortable in a URL.
  */
 import {requireEnv} from '../env';
-import {fetchJson} from '../http';
+import {ApiError, fetchJson} from '../http';
 
 /** Valhalla's costing models, limited to the ones this app offers. */
 export type TravelMode = 'pedestrian' | 'bicycle' | 'multimodal' | 'auto';
@@ -56,6 +56,52 @@ type ValhallaRouteResponse = {
   error_code?: number;
 };
 
+/**
+ * A routing failure with a message fit to show the user.
+ *
+ * Valhalla reports problems as HTTP 400 with a JSON body such as
+ *   {"error_code":154,"error":"Path distance exceeds the max distance limit: 100000 meters"}
+ * fetchJson turns that into an ApiError whose message is only "HTTP 400 for
+ * <url>", which is what reached the screen. The body carries the real reason.
+ */
+export class ValhallaError extends Error {
+  readonly code: number | undefined;
+
+  constructor(message: string, code?: number) {
+    super(message);
+    this.name = 'ValhallaError';
+    this.code = code;
+  }
+}
+
+/** Error codes worth rewording. Anything else shows Valhalla's own text. */
+const FRIENDLY_MESSAGES: Record<number, string> = {
+  // Verified against the public FOSSGIS instance, which caps walking routes
+  // at 100 km. The limit is server configuration, so it is not quoted here.
+  154: 'That is too far to walk from here.',
+};
+
+async function withValhallaErrors<T>(request: Promise<T>): Promise<T> {
+  try {
+    return await request;
+  } catch (error) {
+    if (!(error instanceof ApiError) || !error.body) {
+      throw error;
+    }
+
+    let parsed: {error_code?: number; error?: string};
+    try {
+      parsed = JSON.parse(error.body);
+    } catch {
+      throw error;
+    }
+
+    const code = parsed.error_code;
+    const message = (code !== undefined && FRIENDLY_MESSAGES[code]) || parsed.error;
+    throw message ? new ValhallaError(message, code) : error;
+  }
+}
+
 function baseUrl(): string {
   return requireEnv('VALHALLA_URL').replace(/\/+$/, '');
 }
@@ -71,7 +117,8 @@ export async function fetchRoute(
 ): Promise<RouteResult> {
   const mode = options.mode ?? 'pedestrian';
 
-  const response = await fetchJson<ValhallaRouteResponse>(`${baseUrl()}/route`, {
+  const response = await withValhallaErrors(
+    fetchJson<ValhallaRouteResponse>(`${baseUrl()}/route`, {
     method: 'POST',
     body: {
       locations: [toLocation(from), toLocation(to)],
@@ -79,11 +126,12 @@ export async function fetchRoute(
       units: 'kilometers',
       directions_options: {units: 'kilometers'},
     },
-    // Routing is not idempotent-cheap on a small self-hosted box; one attempt.
-    retry: false,
-    timeoutMs: 20_000,
-    signal: options.signal,
-  });
+      // Routing is not idempotent-cheap on a small self-hosted box; one attempt.
+      retry: false,
+      timeoutMs: 20_000,
+      signal: options.signal,
+    }),
+  );
 
   if (response.error) {
     throw new Error(`Valhalla route failed: ${response.error}`);
@@ -135,19 +183,21 @@ export async function fetchIsochrone(
 ): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry, IsochroneProperties>> {
   const {mode = 'pedestrian', minutes = [5, 10, 15], polygons = true, signal} = options;
 
-  return fetchJson<GeoJSON.FeatureCollection<GeoJSON.Geometry, IsochroneProperties>>(
-    `${baseUrl()}/isochrone`,
-    {
-      method: 'POST',
-      body: {
-        locations: [toLocation(center)],
-        costing: mode,
-        contours: minutes.map(time => ({time})),
-        polygons,
+  return withValhallaErrors(
+    fetchJson<GeoJSON.FeatureCollection<GeoJSON.Geometry, IsochroneProperties>>(
+      `${baseUrl()}/isochrone`,
+      {
+        method: 'POST',
+        body: {
+          locations: [toLocation(center)],
+          costing: mode,
+          contours: minutes.map(time => ({time})),
+          polygons,
+        },
+        retry: false,
+        timeoutMs: 30_000,
+        signal,
       },
-      retry: false,
-      timeoutMs: 30_000,
-      signal,
-    },
+    ),
   );
 }

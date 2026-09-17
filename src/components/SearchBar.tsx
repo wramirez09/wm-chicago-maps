@@ -21,6 +21,9 @@ import {searchLocations, type SearchResult} from '../search/searchIndex';
  */
 const GEOCODE_DEBOUNCE_MS = 300;
 
+/** Height of the search field itself, excluding the results dropdown. */
+export const SEARCH_FIELD_HEIGHT = 44;
+
 /** Local results are capped lower when addresses are also showing. */
 const LOCAL_LIMIT_WITH_ADDRESSES = 5;
 
@@ -206,7 +209,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     paddingHorizontal: 12,
-    height: 44,
+    height: SEARCH_FIELD_HEIGHT,
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 8,

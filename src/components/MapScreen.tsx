@@ -3,18 +3,26 @@ import {
   type CameraRef,
   Map,
   type PressEventWithFeatures,
+  type TrackUserLocationChangeEvent,
   UserLocation,
   type ViewStateChangeEvent,
 } from '@maplibre/maplibre-react-native';
-import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {type NativeSyntheticEvent, StyleSheet, Text, View} from 'react-native';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {DirectionsAction} from './DirectionsAction';
 import {FeatureCard, type MapSelection} from './FeatureCard';
 import {LayerToggle} from './LayerToggle';
 import {LocateButton} from './LocateButton';
-import {SearchBar} from './SearchBar';
+import {SEARCH_FIELD_HEIGHT, SearchBar} from './SearchBar';
 import {WeatherChip} from './WeatherChip';
 import {ArterialOverlay} from './overlays/ArterialOverlay';
 import {BoundaryOverlay} from './overlays/BoundaryOverlay';
@@ -66,8 +74,25 @@ import {
   getCurrentPosition,
   requestLocationPermission,
 } from '../lib/device/location';
-import {roundCoordinate, snapBBox} from '../lib/geo';
+import {isInsideBounds, roundCoordinate, snapBBox} from '../lib/geo';
+import {
+  isPanGesture,
+  type RecenterMode,
+  reconcileTrackingChange,
+  recenterZoom,
+  toTrackUserLocation,
+  type TouchPoint,
+} from '../lib/recenter';
 import type {SearchResult} from '../search/searchIndex';
+
+/**
+ * Inset from the screen's left and right edges, shared by every overlay control
+ * so the search bar, chips, compass and buttons all line up on both sides.
+ */
+const EDGE = 12;
+
+/** Vertical gap between stacked top controls; matches topWrapper's `gap`. */
+const STACK_GAP = 8;
 
 const INITIAL_VISIBILITY: LayerVisibility = {
   expressways: true,
@@ -98,6 +123,16 @@ export function MapScreen() {
     useState<LayerVisibility>(INITIAL_VISIBILITY);
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
+  const [recenterMode, setRecenterMode] = useState<RecenterMode>('off');
+  const [outsideChicago, setOutsideChicago] = useState(false);
+  // Measured rather than assumed, so the compass stays clear of the chips at
+  // any system text size.
+  const [chipRowHeight, setChipRowHeight] = useState(0);
+  const outsideChicagoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Follow starts once the ease to the user lands; see handleLocated.
+  const followTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Where the current one-finger touch on the map began; null once handled.
+  const touchStart = useRef<TouchPoint | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -109,6 +144,88 @@ export function MapScreen() {
 
   // Fires once per gesture, at rest — not per frame — so no debounce needed.
   // The bbox is snapped so small pans reuse cached viewport queries.
+  const cancelPendingFollow = useCallback(() => {
+    if (followTimer.current) {
+      clearTimeout(followTimer.current);
+      followTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelPendingFollow, [cancelPendingFollow]);
+
+  /** Shows the "outside Chicago" hint for a few seconds. */
+  const showOutsideChicago = useCallback(() => {
+    if (outsideChicagoTimer.current) {
+      clearTimeout(outsideChicagoTimer.current);
+    }
+    setOutsideChicago(true);
+    outsideChicagoTimer.current = setTimeout(() => setOutsideChicago(false), 5000);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (outsideChicagoTimer.current) {
+        clearTimeout(outsideChicagoTimer.current);
+      }
+    },
+    [],
+  );
+
+  /**
+   * Any camera move we start ourselves (a tapped feature, a search result) has
+   * to stop following first, or the native camera snaps straight back to the
+   * user on the next location update.
+   */
+  const stopFollowing = useCallback(() => {
+    cancelPendingFollow();
+    setRecenterMode('off');
+  }, [cancelPendingFollow]);
+
+  /**
+   * A drag on the map stops following, as in Google Maps.
+   *
+   * Detected from raw touches rather than map events: onRegionWillChange's
+   * `userInteraction` is also true on Android for the tracking camera's own
+   * moves, so it cannot tell a drag from following. And the native camera's
+   * own "tracking dismissed" event is not reliable enough to be the only way
+   * out — when it was, the map snapped back to the user on every GPS fix and
+   * could not be panned.
+   */
+  const handleMapTouchStart = useCallback((event: GestureResponderEvent) => {
+    const {pageX, pageY, touches} = event.nativeEvent;
+    touchStart.current = touches.length === 1 ? {x: pageX, y: pageY} : null;
+  }, []);
+
+  const handleMapTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      const start = touchStart.current;
+      if (!start) {
+        return;
+      }
+      const {pageX, pageY, touches} = event.nativeEvent;
+      if (touches.length !== 1) {
+        // Became a pinch: not a pan, so stop watching this touch.
+        touchStart.current = null;
+        return;
+      }
+      if (isPanGesture(start, {x: pageX, y: pageY}, touches.length)) {
+        touchStart.current = null;
+        stopFollowing();
+      }
+    },
+    [stopFollowing],
+  );
+
+  // Native may only step tracking down (e.g. rotating out of compass mode);
+  // see reconcileTrackingChange for why it never turns tracking back on.
+  const handleTrackUserLocationChange = useCallback(
+    (event: NativeSyntheticEvent<TrackUserLocationChangeEvent>) => {
+      const reported = event.nativeEvent.trackUserLocation;
+      setRecenterMode(current => reconcileTrackingChange(current, reported));
+    },
+    [],
+  );
+
   const handleRegionDidChange = useCallback(
     (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
       const {bounds, zoom, center} = event.nativeEvent;
@@ -158,6 +275,7 @@ export function MapScreen() {
 
         const center = centerOf(feature.geometry);
 
+        stopFollowing();
         select({
           ...describe(feature.properties as T, center),
           accent: LAYER_ACCENT[layer],
@@ -172,7 +290,7 @@ export function MapScreen() {
           });
         }
       },
-    [select],
+    [select, stopFollowing],
   );
 
   const handleSearchSelect = useCallback(
@@ -183,11 +301,18 @@ export function MapScreen() {
         current[result.layer] ? current : {...current, [result.layer]: true},
       );
 
+      stopFollowing();
       select({
         title: result.title,
         subtitle: result.subtitle,
         accent: result.accent,
         coordinates: result.center,
+        // Same live section as tapping the station on the map; without this a
+        // station opened from search showed no arrivals at all.
+        live:
+          result.kind === 'station'
+            ? {kind: 'cta-station', coordinates: result.center}
+            : undefined,
       });
 
       cameraRef.current?.easeTo({
@@ -196,12 +321,13 @@ export function MapScreen() {
         duration: 600,
       });
     },
-    [select],
+    [select, stopFollowing],
   );
 
   const handleSelectAddress = useCallback(
     (result: GeocodeResult) => {
       const center: [number, number] = [result.longitude, result.latitude];
+      stopFollowing();
       select({
         title: result.properties.name ?? result.label.split(',')[0],
         subtitle: result.label,
@@ -210,16 +336,51 @@ export function MapScreen() {
       });
       cameraRef.current?.easeTo({center, zoom: 17, duration: 600});
     },
-    [select],
+    [select, stopFollowing],
   );
 
-  const handleLocated = useCallback((coordinates: Coordinates) => {
-    setUserLocation(coordinates);
-    cameraRef.current?.easeTo({
-      center: [coordinates.longitude, coordinates.latitude],
-      zoom: 15,
-      duration: 600,
-    });
+  /**
+   * Off → follow. Ease in first, then hand the camera to native tracking.
+   * Tracking keeps whatever zoom the map has and jumps rather than animates,
+   * so enabling it straight away would cancel the ease and leave the user
+   * zoomed out at city scale. A drag during the ease cancels the handover.
+   */
+  const handleLocated = useCallback(
+    (coordinates: Coordinates) => {
+      const duration = 600;
+      setUserLocation(coordinates);
+      cancelPendingFollow();
+
+      // Native tracking ignores the Camera's maxBounds, so following a user
+      // outside the city drags the Chicago map to wherever they are — on the
+      // simulator's default location, downtown San Francisco. Stay on the
+      // city and say why instead.
+      if (!isInsideBounds([coordinates.longitude, coordinates.latitude], CHICAGO_BOUNDS)) {
+        setRecenterMode('off');
+        showOutsideChicago();
+        return;
+      }
+
+      cameraRef.current?.easeTo({
+        center: [coordinates.longitude, coordinates.latitude],
+        zoom: recenterZoom(viewport?.zoom ?? CHICAGO_ZOOM),
+        bearing: 0,
+        duration,
+      });
+      followTimer.current = setTimeout(() => {
+        followTimer.current = null;
+        setRecenterMode('follow');
+      }, duration + 50);
+    },
+    [cancelPendingFollow, showOutsideChicago, viewport?.zoom],
+  );
+
+  const handleRecenterModeChange = useCallback((mode: RecenterMode) => {
+    setRecenterMode(mode);
+    if (mode === 'follow') {
+      // Leaving compass mode: back to north up, as Google Maps does.
+      cameraRef.current?.setStop({bearing: 0, duration: 300});
+    }
   }, []);
 
   const requestDirections = useCallback(async () => {
@@ -243,6 +404,16 @@ export function MapScreen() {
         setUserLocation(origin);
       }
 
+      // Routes start from the user. Outside Chicago that is a request the
+      // routing server rejects (walking routes are distance-capped), and not a
+      // route this app has any business drawing.
+      if (!isInsideBounds([origin.longitude, origin.latitude], CHICAGO_BOUNDS)) {
+        setRouteError(
+          "Walking directions start from your location, and you're outside Chicago.",
+        );
+        return;
+      }
+
       setRoute(
         await fetchRoute([origin.longitude, origin.latitude], destination, {
           mode: 'pedestrian',
@@ -257,8 +428,15 @@ export function MapScreen() {
 
   const handleMapPress = useCallback(() => select(null), [select]);
 
+  const handleChipRowLayout = useCallback((event: LayoutChangeEvent) => {
+    setChipRowHeight(event.nativeEvent.layout.height);
+  }, []);
+
   const zoom = viewport?.zoom ?? CHICAGO_ZOOM;
   const hints: string[] = [];
+  if (outsideChicago) {
+    hints.push("You're outside Chicago, so the map stays on the city");
+  }
   if (visibility.businesses && zoom < BUSINESS_MIN_ZOOM) {
     hints.push('Zoom in to see businesses');
   }
@@ -274,178 +452,200 @@ export function MapScreen() {
 
   return (
     <View style={styles.container}>
-      <Map
+      {/* Observes touches without claiming them, so the map still gets every
+          gesture; see handleMapTouchStart. */}
+      <View
         style={styles.map}
-        mapStyle={MAP_STYLE_URL}
-        onPress={handleMapPress}
-        onRegionDidChange={handleRegionDidChange}
-        compass
-        compassPosition={{top: insets.top + 12, right: 12}}
-        attributionPosition={{bottom: insets.bottom + 12, right: 12}}>
-        <Camera
-          ref={cameraRef}
-          initialViewState={{center: CHICAGO_CENTER, zoom: CHICAGO_ZOOM}}
-          minZoom={MIN_ZOOM}
-          maxZoom={MAX_ZOOM}
-          maxBounds={CHICAGO_BOUNDS}
-        />
+        onTouchStart={handleMapTouchStart}
+        onTouchMove={handleMapTouchMove}>
+        <Map
+          style={styles.map}
+          mapStyle={MAP_STYLE_URL}
+          onPress={handleMapPress}
+          onRegionDidChange={handleRegionDidChange}
+          compass
+          // The search bar spans the full width, so the compass sits just below
+          // the search field and chip row instead of underneath them.
+          compassPosition={{
+            top:
+              insets.top +
+              EDGE +
+              SEARCH_FIELD_HEIGHT +
+              STACK_GAP +
+              chipRowHeight +
+              STACK_GAP,
+            right: EDGE,
+          }}
+          attributionPosition={{bottom: insets.bottom + EDGE, right: EDGE}}>
+          <Camera
+            ref={cameraRef}
+            initialViewState={{center: CHICAGO_CENTER, zoom: CHICAGO_ZOOM}}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
+            maxBounds={CHICAGO_BOUNDS}
+            trackUserLocation={toTrackUserLocation(recenterMode)}
+            onTrackUserLocationChange={handleTrackUserLocationChange}
+          />
 
-        {/* Boundaries first, so every other layer draws on top of them. */}
-        <BoundaryOverlay
-          layer="wards"
-          visible={visibility.wards}
-          data={wards.data}
-          labelField="ward"
-          onPress={selectFeature<{ward?: string}>('wards', p => ({
-            title: `Ward ${p.ward ?? ''}`.trim(),
-            subtitle: 'City Council ward',
-          }))}
-        />
-        <BoundaryOverlay
-          layer="neighborhoods"
-          visible={visibility.neighborhoods}
-          data={communityAreas.data}
-          labelField="community"
-          onPress={selectFeature<{community?: string; area_numbe?: string}>(
-            'neighborhoods',
-            p => ({
-              title: titleCase(p.community ?? 'Community area'),
-              subtitle: p.area_numbe ? `Community area ${p.area_numbe}` : 'Community area',
-            }),
-          )}
-        />
-        <BoundaryOverlay
-          layer="parks"
-          visible={visibility.parks}
-          data={parks.data}
-          labelField="park"
-          labelMinZoom={13}
-          onPress={selectFeature<{park?: string; park_no?: string; acres?: string}>(
-            'parks',
-            p => ({
-              title: titleCase(p.park ?? 'Park'),
-              subtitle: p.acres ? `Park · ${Number(p.acres).toFixed(1)} acres` : 'Park',
-              live: p.park_no ? {kind: 'park', parkNumber: p.park_no} : undefined,
-            }),
-          )}
-        />
+          {/* Boundaries first, so every other layer draws on top of them. */}
+          <BoundaryOverlay
+            layer="wards"
+            visible={visibility.wards}
+            data={wards.data}
+            labelField="ward"
+            onPress={selectFeature<{ward?: string}>('wards', p => ({
+              title: `Ward ${p.ward ?? ''}`.trim(),
+              subtitle: 'City Council ward',
+            }))}
+          />
+          <BoundaryOverlay
+            layer="neighborhoods"
+            visible={visibility.neighborhoods}
+            data={communityAreas.data}
+            labelField="community"
+            onPress={selectFeature<{community?: string; area_numbe?: string}>(
+              'neighborhoods',
+              p => ({
+                title: titleCase(p.community ?? 'Community area'),
+                subtitle: p.area_numbe ? `Community area ${p.area_numbe}` : 'Community area',
+              }),
+            )}
+          />
+          <BoundaryOverlay
+            layer="parks"
+            visible={visibility.parks}
+            data={parks.data}
+            labelField="park"
+            labelMinZoom={13}
+            onPress={selectFeature<{park?: string; park_no?: string; acres?: string}>(
+              'parks',
+              p => ({
+                title: titleCase(p.park ?? 'Park'),
+                subtitle: p.acres ? `Park · ${Number(p.acres).toFixed(1)} acres` : 'Park',
+                live: p.park_no ? {kind: 'park', parkNumber: p.park_no} : undefined,
+              }),
+            )}
+          />
 
-        {/* Declaration order is draw order within each `beforeId` group:
-            arterials sit under expressways, which sit under transit. */}
-        <ArterialOverlay
-          visible={visibility.arterials}
-          onPress={selectFeature<ArterialProperties>('arterials', p => ({
-            title: p.name,
-            subtitle: p.kind === 'primary' ? 'Major street' : 'Street',
-          }))}
-        />
-        <ExpresswayOverlay
-          visible={visibility.expressways}
-          onPress={selectFeature<ExpresswayProperties>('expressways', p => ({
-            title: p.localName || p.name || p.ref,
-            subtitle: [p.ref, p.localName ? p.name : '']
-              .filter(Boolean)
-              .join(' · '),
-          }))}
-        />
-        <TransitOverlay
-          visible={visibility.transit}
-          onPress={selectFeature<
-            TransitLineProperties | TransitStationProperties
-          >('transit', (p, center) =>
-            'line' in p
-              ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
-              : {
-                  title: p.name,
-                  subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
-                  live: center ? {kind: 'cta-station', coordinates: center} : undefined,
-                },
-          )}
-        />
-        <RouteOverlay route={route} />
-        <BusStopOverlay
-          visible={visibility.busStops}
-          bbox={viewport?.bbox ?? null}
-          zoom={zoom}
-          onPress={selectFeature<BusStopFeatureProperties>('busStops', p => ({
-            title: p.name,
-            subtitle: [p.direction, p.routes ? `Routes ${p.routes}` : '']
-              .filter(Boolean)
-              .join(' · '),
-            live: {kind: 'bus-stop', stopId: p.stopId},
-          }))}
-        />
-        <BusinessOverlay
-          visible={visibility.businesses}
-          bbox={viewport?.bbox ?? null}
-          zoom={zoom}
-          onPress={selectFeature<BusinessLicense>('businesses', p => ({
-            title: p.doing_business_as_name || p.legal_name || 'Business',
-            subtitle: p.business_activity || p.license_description || '',
-            details: [
-              p.address,
-              p.community_area_name
-                ? `Community area: ${titleCase(p.community_area_name)}`
-                : undefined,
-              p.expiration_date
-                ? `Licence valid to ${p.expiration_date.slice(0, 10)}`
-                : undefined,
-            ].filter((line): line is string => Boolean(line)),
-            live: {kind: 'business', accountNumber: p.account_number, address: p.address},
-          }))}
-        />
-        <DivvyOverlay
-          visible={visibility.divvy}
-          onPress={selectFeature<DivvyStation>('divvy', p => ({
-            title: p.name,
-            subtitle: p.isRenting
-              ? 'Divvy station · live'
-              : 'Divvy station · not renting',
-            details: [
-              `${p.bikesAvailable} bikes available (${p.ebikesAvailable} e-bikes)`,
-              `${p.docksAvailable} open docks`,
-            ],
-          }))}
-        />
-        <MetraOverlay
-          visible={visibility.metra}
-          onPress={selectFeature<Omit<MetraVehiclePosition, 'reportedAt'>>('metra', p => ({
-            title: p.routeId ? `Metra ${p.routeId}` : 'Metra train',
-            subtitle: p.tripId ? `Trip ${p.tripId}` : 'Live position',
-          }))}
-        />
-        <EventOverlay
-          visible={visibility.events}
-          center={roundedCenter}
-          onPress={selectFeature<EventFeatureProperties>('events', p => ({
-            title: p.title,
-            subtitle: [p.venueName, p.category].filter(Boolean).join(' · '),
-            details: [
-              p.startsAt ? new Date(p.startsAt).toLocaleString() : undefined,
-              p.address ?? undefined,
-            ].filter((line): line is string => Boolean(line)),
-          }))}
-        />
-        <LandmarkOverlay
-          visible={visibility.landmarks}
-          onPress={selectFeature<LandmarkProperties>('landmarks', p => ({
-            title: p.name,
-            subtitle: p.neighborhood,
-          }))}
-        />
+          {/* Declaration order is draw order within each `beforeId` group:
+              arterials sit under expressways, which sit under transit. */}
+          <ArterialOverlay
+            visible={visibility.arterials}
+            onPress={selectFeature<ArterialProperties>('arterials', p => ({
+              title: p.name,
+              subtitle: p.kind === 'primary' ? 'Major street' : 'Street',
+            }))}
+          />
+          <ExpresswayOverlay
+            visible={visibility.expressways}
+            onPress={selectFeature<ExpresswayProperties>('expressways', p => ({
+              title: p.localName || p.name || p.ref,
+              subtitle: [p.ref, p.localName ? p.name : '']
+                .filter(Boolean)
+                .join(' · '),
+            }))}
+          />
+          <TransitOverlay
+            visible={visibility.transit}
+            onPress={selectFeature<
+              TransitLineProperties | TransitStationProperties
+            >('transit', (p, center) =>
+              'line' in p
+                ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
+                : {
+                    title: p.name,
+                    subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
+                    live: center ? {kind: 'cta-station', coordinates: center} : undefined,
+                  },
+            )}
+          />
+          <RouteOverlay route={route} />
+          <BusStopOverlay
+            visible={visibility.busStops}
+            bbox={viewport?.bbox ?? null}
+            zoom={zoom}
+            onPress={selectFeature<BusStopFeatureProperties>('busStops', p => ({
+              title: p.name,
+              subtitle: [p.direction, p.routes ? `Routes ${p.routes}` : '']
+                .filter(Boolean)
+                .join(' · '),
+              live: {kind: 'bus-stop', stopId: p.stopId},
+            }))}
+          />
+          <BusinessOverlay
+            visible={visibility.businesses}
+            bbox={viewport?.bbox ?? null}
+            zoom={zoom}
+            onPress={selectFeature<BusinessLicense>('businesses', p => ({
+              title: p.doing_business_as_name || p.legal_name || 'Business',
+              subtitle: p.business_activity || p.license_description || '',
+              details: [
+                p.address,
+                p.community_area_name
+                  ? `Community area: ${titleCase(p.community_area_name)}`
+                  : undefined,
+                p.expiration_date
+                  ? `Licence valid to ${p.expiration_date.slice(0, 10)}`
+                  : undefined,
+              ].filter((line): line is string => Boolean(line)),
+              live: {kind: 'business', accountNumber: p.account_number, address: p.address},
+            }))}
+          />
+          <DivvyOverlay
+            visible={visibility.divvy}
+            onPress={selectFeature<DivvyStation>('divvy', p => ({
+              title: p.name,
+              subtitle: p.isRenting
+                ? 'Divvy station · live'
+                : 'Divvy station · not renting',
+              details: [
+                `${p.bikesAvailable} bikes available (${p.ebikesAvailable} e-bikes)`,
+                `${p.docksAvailable} open docks`,
+              ],
+            }))}
+          />
+          <MetraOverlay
+            visible={visibility.metra}
+            onPress={selectFeature<Omit<MetraVehiclePosition, 'reportedAt'>>('metra', p => ({
+              title: p.routeId ? `Metra ${p.routeId}` : 'Metra train',
+              subtitle: p.tripId ? `Trip ${p.tripId}` : 'Live position',
+            }))}
+          />
+          <EventOverlay
+            visible={visibility.events}
+            center={roundedCenter}
+            onPress={selectFeature<EventFeatureProperties>('events', p => ({
+              title: p.title,
+              subtitle: [p.venueName, p.category].filter(Boolean).join(' · '),
+              details: [
+                p.startsAt ? new Date(p.startsAt).toLocaleString() : undefined,
+                p.address ?? undefined,
+              ].filter((line): line is string => Boolean(line)),
+            }))}
+          />
+          <LandmarkOverlay
+            visible={visibility.landmarks}
+            onPress={selectFeature<LandmarkProperties>('landmarks', p => ({
+              title: p.name,
+              subtitle: p.neighborhood,
+            }))}
+          />
 
-        {userLocation ? <UserLocation animated accuracy /> : null}
-      </Map>
+          {userLocation ? <UserLocation animated accuracy heading={recenterMode === 'heading'} /> : null}
+        </Map>
+      </View>
 
       {/* Search sits above the chips; both clear the compass on the right. */}
       <View
-        style={[styles.topWrapper, {top: insets.top + 12}]}
+        style={[styles.topWrapper, {top: insets.top + EDGE}]}
         pointerEvents="box-none">
         <SearchBar
           onSelect={handleSearchSelect}
           onSelectAddress={handleSelectAddress}
         />
-        <LayerToggle visibility={visibility} onToggle={toggleLayer} />
+        <View onLayout={handleChipRowLayout}>
+          <LayerToggle visibility={visibility} onToggle={toggleLayer} />
+        </View>
         <WeatherChip coordinates={roundedCenter} />
         {hints.map(hint => (
           <View key={hint} style={styles.hint}>
@@ -460,7 +660,11 @@ export function MapScreen() {
         <View
           style={[styles.locateWrapper, {bottom: insets.bottom + 56}]}
           pointerEvents="box-none">
-          <LocateButton onLocated={handleLocated} />
+          <LocateButton
+            mode={recenterMode}
+            onLocated={handleLocated}
+            onModeChange={handleRecenterModeChange}
+          />
         </View>
       )}
 
@@ -521,10 +725,9 @@ const styles = StyleSheet.create({
   map: {flex: 1},
   topWrapper: {
     position: 'absolute',
-    left: 12,
-    // Keep clear of the compass in the top-right corner.
-    right: 60,
-    gap: 8,
+    left: EDGE,
+    right: EDGE,
+    gap: STACK_GAP,
   },
   hint: {
     alignSelf: 'flex-start',
@@ -534,7 +737,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
   },
   hintText: {fontSize: 12, color: '#ffffff', fontWeight: '500'},
-  locateWrapper: {position: 'absolute', right: 12},
+  locateWrapper: {position: 'absolute', right: EDGE},
   cardWrapper: {
     position: 'absolute',
     left: 16,

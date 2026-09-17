@@ -48,11 +48,42 @@ describe('fetchRoute', () => {
     restore();
   });
 
-  it('surfaces a Valhalla error body', async () => {
-    const {restore} = mockFetchOnce({error: 'No path could be found'});
-    await expect(fetchRoute([-87.65, 41.94], [-87.62, 41.87])).rejects.toThrow(
-      /No path could be found/,
+  // The real server reports errors as HTTP 400 with a JSON body. The body
+  // below was captured from valhalla1.openstreetmap.de for a walk from San
+  // Francisco to Chicago.
+  it('turns a 400 distance-limit error into a readable message', async () => {
+    const {restore} = mockFetchOnce(
+      {
+        error_code: 154,
+        error: 'Path distance exceeds the max distance limit: 100000 meters',
+        status_code: 400,
+        status: 'Bad Request',
+      },
+      400,
     );
+
+    await expect(fetchRoute([-122.4064, 37.7858], [-87.6713, 41.8293])).rejects.toThrow(
+      'That is too far to walk from here.',
+    );
+    restore();
+  });
+
+  it("falls back to Valhalla's own text for other errors", async () => {
+    const {restore} = mockFetchOnce(
+      {error_code: 999, error: 'Some other routing failure', status_code: 400},
+      400,
+    );
+
+    await expect(fetchRoute([-87.65, 41.94], [-87.62, 41.87])).rejects.toThrow(
+      'Some other routing failure',
+    );
+    restore();
+  });
+
+  it('keeps the original error when the body is not Valhalla JSON', async () => {
+    const {restore} = mockFetchOnce('<html>gateway timeout</html>', 400);
+
+    await expect(fetchRoute([-87.65, 41.94], [-87.62, 41.87])).rejects.toThrow(/HTTP 400/);
     restore();
   });
 });
