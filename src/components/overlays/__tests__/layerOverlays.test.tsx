@@ -3,6 +3,7 @@ import ReactTestRenderer from 'react-test-renderer';
 
 import {ArterialOverlay} from '../ArterialOverlay';
 import {ExpresswayOverlay} from '../ExpresswayOverlay';
+import {LandmarkOverlay} from '../LandmarkOverlay';
 import {TransitOverlay} from '../TransitOverlay';
 
 jest.mock('@maplibre/maplibre-react-native', () => {
@@ -68,5 +69,35 @@ describe('API-backed layer overlays', () => {
     const [lineSource, stationSource] = sources(renderer);
     expect(lineSource.props.data).toBe(lines);
     expect(stationSource.props.data).toEqual(EMPTY);
+  });
+});
+
+describe('LandmarkOverlay (places)', () => {
+  const PLACES = {
+    type: 'FeatureCollection' as const,
+    features: [
+      {
+        type: 'Feature' as const,
+        geometry: {type: 'Point' as const, coordinates: [-87.6233, 41.8827] as [number, number]},
+        properties: {
+          id: '5b1e2a3c-0000-4000-8000-000000000001',
+          slug: 'cloud-gate',
+          name: 'Cloud Gate',
+          category: 'landmark' as const,
+          independence: 'excluded' as const,
+          communityArea: null,
+          address: null,
+          vouchCount: 0,
+        },
+      },
+    ],
+  };
+
+  it('is empty until places load, then draws the API collection', async () => {
+    const loading = await render(<LandmarkOverlay visible data={undefined} onPress={jest.fn()} />);
+    expect(sources(loading)[0].props.data).toEqual(EMPTY);
+
+    const loaded = await render(<LandmarkOverlay visible data={PLACES} onPress={jest.fn()} />);
+    expect(sources(loaded)[0].props.data).toBe(PLACES);
   });
 });

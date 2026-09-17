@@ -3,17 +3,25 @@ import React from 'react';
 
 import {LAYER_ACCENT} from '../../config/layers';
 import {FONT_REGULAR} from '../../config/map';
-import {LANDMARKS} from '../../data/landmarks';
+import type {PlaceCollection} from '@wm/shared';
+
+import {EMPTY_COLLECTION} from '../../lib/geo';
 import type {OverlayPressHandler} from './types';
 
 const SOURCE_ID = 'landmarks';
 
 type Props = {
   visible: boolean;
+  /** From usePlaces(viewport, 'landmark'); undefined while loading. */
+  data: PlaceCollection | undefined;
   onPress: OverlayPressHandler;
 };
 
-export function LandmarkOverlay({visible, onPress}: Props) {
+/**
+ * The app's places layer, currently landmarks. Mounts with an empty collection
+ * while loading, like the other API-backed overlays.
+ */
+export function LandmarkOverlay({visible, data, onPress}: Props) {
   if (!visible) {
     return null;
   }
@@ -21,7 +29,7 @@ export function LandmarkOverlay({visible, onPress}: Props) {
   // No `beforeId` here: landmarks are the app's own points of interest and
   // should sit on top of everything, basemap labels included.
   return (
-    <GeoJSONSource id={SOURCE_ID} data={LANDMARKS} onPress={onPress}>
+    <GeoJSONSource id={SOURCE_ID} data={data ?? EMPTY_COLLECTION} onPress={onPress}>
       <Layer
         id="landmarks-circle"
         type="circle"

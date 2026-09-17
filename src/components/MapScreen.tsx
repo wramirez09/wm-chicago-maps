@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import type {Independence, PlaceSummary} from '@wm/shared';
 
 import {DirectionsAction} from './DirectionsAction';
 import {FeatureCard, type MapSelection} from './FeatureCard';
@@ -53,14 +54,13 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
 } from '../config/map';
-import {useLayer} from '../api/hooks';
+import {type Bbox, useLayer, usePlaces} from '../api/hooks';
 import type {
   ArterialProperties,
   ExpresswayProperties,
   TransitLineProperties,
   TransitStationProperties,
 } from '../api/types';
-import type {LandmarkProperties} from '../data/landmarks';
 import {hasEnv} from '../lib/api/env';
 import {useParkBoundaries, useWardBoundaries} from '../lib/api/neighborhoods/hooks';
 import type {BusinessLicense} from '../lib/api/places/businessLicenses';
@@ -75,7 +75,13 @@ import {
   getCurrentPosition,
   requestLocationPermission,
 } from '../lib/device/location';
-import {isInsideBounds, roundCoordinate, snapBBox} from '../lib/geo';
+import {
+  bboxMovedSignificantly,
+  isInsideBounds,
+  roundBbox,
+  roundCoordinate,
+  snapBBox,
+} from '../lib/geo';
 import {
   isPanGesture,
   type RecenterMode,
@@ -114,6 +120,22 @@ const INITIAL_VISIBILITY: LayerVisibility = {
 
 type PressEvent = NativeSyntheticEvent<PressEventWithFeatures>;
 
+/** Places refetch this long after the camera settles, not on every event. */
+const PLACES_DEBOUNCE_MS = 300;
+
+/**
+ * Card wording for each independence state. `excluded` (landmarks, parks, and
+ * anything outside the independence question) shows nothing: "Excluded" on
+ * Cloud Gate would read as an error.
+ */
+const INDEPENDENCE_LABEL: Record<Independence, string | null> = {
+  verified: 'Verified independent',
+  vouched: 'Vouched independent',
+  unverified: 'Independence unverified',
+  chain: 'Chain',
+  excluded: null,
+};
+
 type Viewport = {bbox: BBox; zoom: number; center: [number, number]};
 
 export function MapScreen() {
@@ -145,6 +167,21 @@ export function MapScreen() {
   const arterials = useLayer('arterials');
   const transitLines = useLayer('transit-lines');
   const transitStations = useLayer('transit-stations');
+
+  // The bbox that places are fetched for. Starts as the whole city so
+  // landmarks draw before the first camera event; after that it follows the
+  // viewport, debounced, and only when the view moved by more than ~10%.
+  const [placesBbox, setPlacesBbox] = useState<Bbox>(CHICAGO_BOUNDS);
+  const placesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (placesTimer.current) {
+        clearTimeout(placesTimer.current);
+      }
+    },
+    [],
+  );
+  const landmarks = usePlaces(placesBbox, 'landmark');
 
   // Boundary polygons are fetched only while their layer is on.
   const communityAreas = useCommunityAreas({enabled: visibility.neighborhoods});
@@ -239,6 +276,16 @@ export function MapScreen() {
     (event: NativeSyntheticEvent<ViewStateChangeEvent>) => {
       const {bounds, zoom, center} = event.nativeEvent;
       setViewport({bbox: snapBBox(bounds), zoom, center});
+
+      if (placesTimer.current) {
+        clearTimeout(placesTimer.current);
+      }
+      placesTimer.current = setTimeout(() => {
+        placesTimer.current = null;
+        setPlacesBbox(current =>
+          bboxMovedSignificantly(current, bounds) ? roundBbox(bounds) : current,
+        );
+      }, PLACES_DEBOUNCE_MS);
     },
     [],
   );
@@ -638,9 +685,15 @@ export function MapScreen() {
           />
           <LandmarkOverlay
             visible={visibility.landmarks}
-            onPress={selectFeature<LandmarkProperties>('landmarks', p => ({
+            data={landmarks.data}
+            onPress={selectFeature<PlaceSummary>('landmarks', p => ({
               title: p.name,
-              subtitle: p.neighborhood,
+              // Native feature properties drop null values, so a missing
+              // communityArea arrives as undefined; filter(Boolean) covers both.
+              subtitle: [p.communityArea, INDEPENDENCE_LABEL[p.independence]]
+                .filter(Boolean)
+                .join(' · '),
+              live: {kind: 'place', id: p.id},
             }))}
           />
 

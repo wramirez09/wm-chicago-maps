@@ -2,6 +2,7 @@ import React from 'react';
 import {ActivityIndicator, StyleSheet, Text, View} from 'react-native';
 
 import {KeyHint} from './KeyHint';
+import {usePlace} from '../api/hooks';
 import {hasEnv} from '../lib/api/env';
 import {useParkEvents, useParkFacilities} from '../lib/api/neighborhoods/hooks';
 import {useBusinessOwners, useParcelsByAddress} from '../lib/api/places/hooks';
@@ -10,6 +11,7 @@ import {useBusPredictions, useCtaStations, useTrainArrivals} from '../lib/api/tr
 
 /** Which live feed a selected feature should load. */
 export type LiveDetail =
+  | {kind: 'place'; id: string}
   | {kind: 'cta-station'; coordinates: [number, number]}
   | {kind: 'business'; accountNumber?: string; address?: string}
   | {kind: 'bus-stop'; stopId: string}
@@ -19,6 +21,8 @@ type Props = {detail: LiveDetail};
 
 export function SelectionDetails({detail}: Props) {
   switch (detail.kind) {
+    case 'place':
+      return <PlaceDetails id={detail.id} />;
     case 'cta-station':
       return <TrainArrivals coordinates={detail.coordinates} />;
     case 'business':
@@ -28,6 +32,47 @@ export function SelectionDetails({detail}: Props) {
     case 'park':
       return <ParkDetails parkNumber={detail.parkNumber} />;
   }
+}
+
+/**
+ * The detail view for a tapped place. The card's title and subtitle come from
+ * the PlaceSummary already on the map feature; this loads the rest.
+ */
+function PlaceDetails({id}: {id: string}) {
+  const place = usePlace(id);
+
+  if (place.isLoading) {
+    return <Loading />;
+  }
+  if (place.isError || !place.data) {
+    return <Note>Details unavailable right now.</Note>;
+  }
+
+  const {description, address, website, phone, independenceReason, vouchCount} = place.data;
+  const hasContact = Boolean(address || website || phone);
+
+  return (
+    <>
+      {description ? <Line>{description}</Line> : null}
+      {hasContact ? (
+        <Section title="Details">
+          {address ? <Line>{address}</Line> : null}
+          {phone ? <Line>{phone}</Line> : null}
+          {website ? <Line>{website}</Line> : null}
+        </Section>
+      ) : null}
+      {independenceReason || vouchCount > 0 ? (
+        <Section title="Independence">
+          {independenceReason ? <Line>{independenceReason}</Line> : null}
+          {vouchCount > 0 ? (
+            <Line>
+              Vouched for by {vouchCount} {vouchCount === 1 ? 'person' : 'people'}
+            </Line>
+          ) : null}
+        </Section>
+      ) : null}
+    </>
+  );
 }
 
 function TrainArrivals({coordinates}: {coordinates: [number, number]}) {

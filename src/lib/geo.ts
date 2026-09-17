@@ -123,3 +123,46 @@ export function isInsideBounds(
 ): boolean {
   return longitude >= west && longitude <= east && latitude >= south && latitude <= north;
 }
+
+type BoundsTuple = readonly [number, number, number, number];
+
+/**
+ * Whether the viewport moved enough to be worth refetching viewport data.
+ *
+ * "Enough" is more than `threshold` (10% by default) of the previous box, on
+ * any axis: the centre shifting sideways or up/down, or the box growing or
+ * shrinking (a zoom). Small pans and nudges reuse what is already loaded.
+ */
+export function bboxMovedSignificantly(
+  previous: BoundsTuple,
+  next: BoundsTuple,
+  threshold = 0.1,
+): boolean {
+  const [pw, ps, pe, pn] = previous;
+  const [nw, ns, ne, nn] = next;
+
+  const width = pe - pw;
+  const height = pn - ps;
+  if (!(width > 0) || !(height > 0)) {
+    return true;
+  }
+
+  const centerShiftX = Math.abs((nw + ne) / 2 - (pw + pe) / 2) / width;
+  const centerShiftY = Math.abs((ns + nn) / 2 - (ps + pn) / 2) / height;
+  const widthChange = Math.abs(ne - nw - width) / width;
+  const heightChange = Math.abs(nn - ns - height) / height;
+
+  // Epsilon, because degree arithmetic is float arithmetic: an exact 10% pan
+  // computes as 0.10000000000000142 and would otherwise count as significant.
+  return Math.max(centerShiftX, centerShiftY, widthChange, heightChange) > threshold + 1e-9;
+}
+
+/** Round each edge, so tiny float noise does not create a new query key. */
+export function roundBbox(
+  [west, south, east, north]: BoundsTuple,
+  decimals = 5,
+): [number, number, number, number] {
+  const factor = 10 ** decimals;
+  const round = (v: number) => Math.round(v * factor) / factor;
+  return [round(west), round(south), round(east), round(north)];
+}
