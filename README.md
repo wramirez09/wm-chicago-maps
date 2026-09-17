@@ -6,9 +6,15 @@ A bare React Native app (no Expo) rendering a MapLibre map of Chicago.
 - **Basemap:** [OpenFreeMap](https://openfreemap.org) "Liberty" — a full
   OpenMapTiles/OSM basemap with street, highway and place detail. Free, no API
   key. See [Swapping the basemap](#swapping-the-basemap).
-- **Overlays:** Chicago expressways, arterial streets and the CTA 'L' network,
-  each toggleable and tappable. See [Map data](#map-data).
-- **Search:** offline search over that data — no geocoder, no API key. See
+- **Data:** every overlay, place and live feed comes from
+  [wm-chicago-maps-backend](https://github.com/wramirez09/wm-chicago-maps-backend).
+  The app calls exactly one host — the API — plus OpenFreeMap for basemap
+  tiles. See [Backend API](#backend-api).
+- **Overlays:** expressways, arterial streets, the CTA 'L' network, landmarks,
+  Divvy, events and neighbourhoods, each toggleable and tappable. Layers are
+  cached on disk, so the map draws offline after the first launch. See
+  [Map data](#map-data).
+- **Search:** over the map's own loaded data, no request per keystroke. See
   [Search](#search).
 
 ## Requirements
@@ -24,6 +30,25 @@ A bare React Native app (no Expo) rendering a MapLibre map of Chicago.
 ```sh
 npm install
 (cd ios && bundle install && bundle exec pod install)
+```
+
+Then point the app at a running backend. Copy `.env.example` to `.env` and set
+`API_URL` (the simulator default is `http://localhost:3000`; see the comments
+for the Android emulator and physical devices). `react-native-config` inlines
+it at **native build** time, so changing it needs `npm run ios`/`android`, not
+a Metro reload.
+
+To run the backend locally, in the backend repo:
+
+```sh
+docker compose -f infra/docker-compose.yml up --build -d
+docker compose -f infra/docker-compose.yml exec api node dist/jobs/run.js ingest.areas
+docker compose -f infra/docker-compose.yml exec api node dist/jobs/run.js ingest.layers
+# The landmark seed runs from source (it is not in the container build):
+pnpm install && pnpm --filter @wm/shared --filter @wm/db build
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/chicago \
+  JWT_SECRET=local-dev-only-secret-local-dev-only-secret \
+  pnpm --filter @wm/api seed
 ```
 
 `ios/Podfile` calls `$MLRN.post_install(installer)`. That hook is what pulls
@@ -53,42 +78,51 @@ Note: this project uses **npm** (`package-lock.json`), not yarn or pnpm.
 
 | Path | What it is |
 | --- | --- |
-| `App.tsx` | Root component: safe-area provider + `MapScreen` |
-| `src/config/map.ts` | Style URL, fontstacks, label anchor, center/bounds, zoom limits |
-| `src/data/landmarks.ts` | Hand-written GeoJSON points |
-| `src/data/expressways.ts` | **Generated** — motorway/trunk lines from OSM |
-| `src/data/arterials.ts` | **Generated** — named primary/secondary streets from OSM |
-| `src/data/transit.ts` | **Generated** — CTA 'L' lines and stations from OSM |
-| `scripts/fetch-*.mjs` | Regenerate the three datasets from the Overpass API |
+| `App.tsx` | Root: persisted query client, safe-area provider, `MapScreen` |
+| `src/api/client.ts` | The only HTTP client: `API_URL`, 10 s timeout, zod-validated responses, `ApiError` |
+| `src/api/hooks.ts` | TanStack Query hooks: layers, places, areas, events, Divvy, arrivals |
+| `src/api/queryClient.ts` | Stale times and on-disk persistence of layers and areas |
+| `src/api/storage.ts` | MMKV stores (auth, cache) |
+| `src/api/schema/` | **Vendored** `@wm/shared` — the backend's zod contract; do not edit |
+| `src/api/types.ts` | TypeScript types inferred from the contract |
+| `src/config/map.ts` | Style URL, fontstacks, label anchor, zoom limits |
+| `src/config/layers.ts` | Layer keys, accent colours, labels, focus zooms |
 | `src/components/MapScreen.tsx` | Map, camera, overlay wiring, tap handling |
-| `src/components/overlays/` | One component per data layer (source + style layers) |
+| `src/components/overlays/` | One component per layer (source + style layers) |
 | `src/components/LayerToggle.tsx` | Chips that show/hide each overlay |
 | `src/components/SearchBar.tsx` | Search field + results list |
-| `src/search/searchIndex.ts` | Builds and queries the offline search index |
-| `src/config/layers.ts` | Layer keys, accent colours, labels, focus zooms |
 | `src/components/FeatureCard.tsx` | Bottom card shown when a feature is tapped |
-| `src/lib/api/` | API clients, one file per service, grouped |
-| `src/lib/api/http.ts` | The only `fetch` wrapper: timeout, retry, typed errors |
+| `src/search/searchIndex.ts` | Builds and queries the search index from loaded data |
 | `src/lib/device/` | Location and push wrappers |
-| `supabase/functions/` | Edge Functions for credentials that can't ship |
-| `scripts/ingest/` | Bulk data loaders, run with tsx |
-| `__mocks__/@maplibre/` | Jest mock — MapLibre is native and can't render in Jest |
-| `__mocks__/react-native-config.js` | Jest mock — env is inlined at native build time |
+| `docs/openapi.json` | The backend's OpenAPI, for reference |
+| `__mocks__/` | Jest mocks for native modules (MapLibre, MMKV, config, permissions, geolocation) |
 
 ## Map data
 
-The three overlay datasets are generated, not hand-maintained. Each script
-queries the [Overpass API](https://overpass-api.de) for the Chicago bounding
-box, simplifies the geometry (Douglas-Peucker) and writes a typed TS module:
+Overlay data lives in the backend. It ingests the layers from OpenStreetMap on
+a weekly job and serves them as GeoJSON; the app no longer bundles or
+generates any of it.
 
-```sh
-node scripts/fetch-expressways.mjs
-node scripts/fetch-arterials.mjs
-node scripts/fetch-transit.mjs
-```
+| Overlay | Endpoint |
+| --- | --- |
+| Expressways | `GET /v1/layers/expressways` |
+| Arterial streets | `GET /v1/layers/arterials` |
+| CTA 'L' lines / stations | `GET /v1/layers/transit-lines`, `GET /v1/layers/transit-stations` |
+| Landmarks | `GET /v1/places?bbox=…&category=landmark` |
+| Neighbourhoods | `GET /v1/areas` |
+| Divvy | `GET /v1/transit/divvy` |
+| Events | `GET /v1/events?bbox=…` |
 
-The output is committed so the app needs no network at build time. Re-run a
-script when the data goes stale; do not edit `src/data/*.ts` by hand.
+Layers are fetched once, persisted to disk (MMKV), and revalidated with their
+ETag (`If-None-Match`); a `304` keeps the cached body. So after the first
+successful launch the overlays draw immediately, including with the API down.
+Landmarks and events follow the viewport: the camera's region is debounced
+300 ms and only refetched when the view moves by more than ~10%.
+
+While a layer is still loading its source mounts with an empty collection
+rather than not at all. Layers are inserted below `LABEL_ANCHOR_LAYER_ID` at
+mount time, so mount order is draw order; mounting empty keeps arterials under
+expressways under transit regardless of which request finishes first.
 
 Overlay data is © OpenStreetMap contributors, licensed
 [ODbL](https://opendatacommons.org/licenses/odbl/). The app surfaces this
@@ -96,11 +130,12 @@ through MapLibre's built-in attribution control — keep it visible.
 
 ### Adding an overlay
 
-1. Write (or generate) `src/data/<thing>.ts` exporting a typed
-   `FeatureCollection`.
-2. Add `src/components/overlays/<Thing>Overlay.tsx`: a `GeoJSONSource` plus its
-   style `Layer`s, exporting a `<THING>_ACCENT` colour.
-3. Register it in `LayerToggle.tsx`'s `LAYERS` array and render it in
+1. Serve it from the backend and add its schema to `@wm/shared`, then
+   re-vendor `src/api/schema/`.
+2. Add a hook in `src/api/hooks.ts` (for a layer, extend `LAYER_SCHEMAS`).
+3. Add `src/components/overlays/<Thing>Overlay.tsx` taking the collection as a
+   `data` prop, mounting with `EMPTY_COLLECTION` while it loads.
+4. Add the key to `src/config/layers.ts` and render the overlay in
    `MapScreen.tsx` with a `selectFeature` describer.
 
 Overlay layers pass `beforeId={LABEL_ANCHOR_LAYER_ID}` so they draw above the
@@ -109,13 +144,16 @@ top of everything.
 
 ## Search
 
-`src/search/searchIndex.ts` indexes the committed datasets — landmark names,
-CTA station names, 'L' line names, expressway names and every distinct arterial
-street name — and matches them as the user types. It needs no network and no
-API key, and a warm query takes well under a millisecond.
+`src/search/searchIndex.ts` indexes the collections the map has already
+loaded — landmark names, CTA station names, 'L' line names, expressway names
+and every distinct arterial street name — and matches them as the user types.
+`SearchBar` reads the same cached queries as the map, so searching makes no
+request, works offline once layers are cached, and a warm query takes well
+under a millisecond.
 
-The index is built lazily on the first keystroke (~25 ms to walk ~25k
-features), not at startup. Lines sharing a name are collapsed into one result,
+The index is built lazily on the first real query (~50 ms to walk ~25k
+features in Node), not at startup, and rebuilt only when a collection is
+replaced. Lines sharing a name are collapsed into one result,
 whose camera target is the real vertex nearest the group's bounding-box centre
 — a street that bends or is split around a park has a box centre that can sit
 blocks off the pavement.
@@ -130,82 +168,56 @@ Three behaviours worth knowing before changing the ranking:
 - Stations with the same name *and* the same serving lines are collapsed —
   that pattern means one platform split across two OSM records.
 
-**It does not do street addresses.** "1060 W Addison" finds nothing. Adding
-that means a geocoder (Nominatim and Photon are free; both have usage policies,
-and Nominatim requires a real User-Agent). Wire one in as a second result
-source behind `searchLocations`, merging its hits into the same `SearchResult`
-shape — the UI needs no change.
+**It does not do street addresses.** "1060 W Addison" finds nothing. That needs
+a geocoding endpoint in the backend; merge its hits into the same
+`SearchResult` shape and the UI needs no change.
 
-## API integrations
+## Backend API
 
-Clients live in `src/lib/api/<group>/<service>.ts`, one file per service, named
-exports only. Every one of them goes through `src/lib/api/http.ts` — a single
-`fetchJson` with an AbortController timeout, one retry on 5xx/network, JSON
-parsing and a typed `ApiError`. Read-only calls are wrapped in TanStack Query
-hooks in each group's `hooks.ts`.
+`src/api/client.ts` is the only thing in the app that makes HTTP requests. It
+prefixes `API_URL`, times out after 10 s, validates every response with the
+backend's zod schemas (`schema.parse`, so contract drift fails loudly instead
+of rendering undefined fields), sends the Bearer token when signed in, and
+throws one `ApiError` carrying the backend's `statusCode` and `message`.
 
-| Service | Purpose | Key from | Runs |
-| --- | --- | --- | --- |
-| Chicago Data Portal (Socrata) | Business licences, owners, community areas | `SOCRATA_APP_TOKEN` (optional, public) | On-device |
-| Cook County Assessor | Parcel lookup by PIN/address; owner-occupancy signal | none | On-device |
-| Photon | Geocode / reverse geocode, bbox-locked to Chicago | `PHOTON_URL` (self-hosted) | On-device |
-| Overture Maps Places | Bulk POI extract → `places_raw` | none | Ingest script |
-| OpenStreetMap Overpass | POI diff source | none | Ingest script |
-| Google Business Profile | Owner-consented listing sync | `GBP_CLIENT_ID`/`GBP_CLIENT_SECRET` | **Edge Function** |
-| Chicago boundaries | Wards, parks, landmarks, ZIPs (GeoJSON) | reuses Socrata | On-device |
-| Chicago Park District | Outdoor event permits, park facilities | reuses Socrata | On-device |
-| CTA Train Tracker | 'L' arrivals by mapid/stpid | `CTA_TRAIN_KEY` | On-device |
-| CTA Bus Tracker v2 | Bus predictions, live vehicles | `CTA_BUS_KEY` | On-device |
-| CTA GTFS static | Stops/routes → `transit_stops` | none | Ingest script |
-| Divvy GBFS | Station information + live status | none | On-device |
-| Metra GTFS-RT | Vehicle positions, trip updates (protobuf) | `METRA_KEY`/`METRA_SECRET` | On-device |
-| Valhalla | Routing + isochrones | `VALHALLA_URL` (self-hosted) | On-device |
-| Ticketmaster Discovery | Events by lat/long + radius | `TICKETMASTER_KEY` | On-device |
-| Bandsintown | Concerts by location | `BANDSINTOWN_APP_ID` | On-device |
-| Eventbrite | Organiser-owned events only | `EVENTBRITE_TOKEN` | **Edge Function** |
-| Open-Meteo | Current conditions for the events feed | none | On-device |
-| Sentry / PostHog | Crash reporting, product analytics | `SENTRY_DSN`, `POSTHOG_API_KEY` | On-device (not installed) |
+### The contract (`@wm/shared`)
 
-### Where keys live
-
-`react-native-config` inlines `.env` at **native build** time, so changing a
-value needs a rebuild — a Metro reload will not pick it up. Everything in
-`.env` ships inside the app bundle and must be treated as public.
-
-Three things never go there:
-
-- `EVENTBRITE_TOKEN`, `GBP_CLIENT_SECRET` → `supabase secrets set …`. The app
-  calls the Edge Function; the function calls the vendor.
-- `SUPABASE_SERVICE_ROLE_KEY` → `scripts/.env` (gitignored). It bypasses RLS
-  and is only used by the ingest scripts.
-
-The Socrata app token is the deliberate exception: it is a public throttling
-identifier, not a credential, and Socrata expects it in client requests.
+The schemas are **vendored** into `src/api/schema/` from the backend's
+`packages/shared/src` — the commit is recorded in each file's header. They are
+not installed as a package: npm cannot install a subdirectory of a git repo (it
+ignores `&path:` and installs the whole monorepo under another name), and the
+package depends on pnpm `workspace:` packages. An `@wm/shared` alias in
+`metro.config.js`, `tsconfig.json` and `jest.config.js` keeps imports reading as
+the package name. To update: copy the files again, drop the `.js` suffix from
+relative imports (Metro does not map `./common.js` to `common.ts`), and bump
+`CACHE_BUSTER` in `src/api/queryClient.ts` so old cached data is discarded.
 
 ### Cache policy
 
-`staleTime` is set per data class in `src/lib/query.ts`: static datasets 24h,
-live arrivals 30s, GBFS 60s, weather 10m. `fetchJson` already retries once, so
-the QueryClient sets `retry: false` — otherwise one failure becomes four
-requests.
+Set in `src/api/queryClient.ts`: layers and areas 24 h, places and Divvy 60 s,
+arrivals 30 s, events 5 min. Only layers and areas are persisted, for 30 days —
+live data restored from disk would show stale times as current. The persister
+skips writes when no persisted query changed: the cache is ~5.5 MB of JSON, and
+without that every Divvy refresh would re-serialise it.
 
-### Ingest scripts
+### Not available yet
 
-Bulk downloads run under `tsx` on a workstation, not in the app:
+These were removed when the app moved onto the API, because they called
+third parties directly and the API has no equivalent yet. Each comes back when
+its endpoint exists.
 
-```sh
-npm run ingest:overture     # needs `pipx install overturemaps`
-npm run ingest:overpass
-npm run ingest:gtfs-cta
-```
+| Feature | Needs |
+| --- | --- |
+| Station arrivals | A CTA `mapId` on transit-stations features (`/v1/transit/arrivals` exists, but there is no stop id to call it with) |
+| Address search | A geocoding endpoint |
+| Weather chip | A weather endpoint |
+| Parks, wards, bus stops layers | Boundary / stop layers |
+| Businesses, ownership | Places ingested from licences |
+| Metra positions | Metra support (`/v1/transit/arrivals` answers "not implemented") |
 
 ### Tests
 
-One Jest test per client, each replaying a fixture from
-`src/lib/api/__fixtures__/` against a mocked `fetch`. No test touches the
-network. Fixtures for the keyless APIs are recorded from live responses; those
-for key-gated APIs (CTA, Ticketmaster, Bandsintown, Eventbrite) are built from
-the published response shapes.
+Client tests mock `fetch`; nothing in the suite touches the network.
 
 ## Swapping the basemap
 
@@ -225,9 +237,9 @@ For a keyed provider, read the key from the environment (e.g. via
 
 ## Showing the user's location
 
-`UserLocation` / `Camera trackUserLocation` are not wired up yet. They need
-platform permissions first:
-
-- iOS — `NSLocationWhenInUseUsageDescription` in `ios/WmChicagoMaps/Info.plist`
-- Android — `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` in
-  `android/app/src/main/AndroidManifest.xml`, requested at runtime
+The recenter button (bottom right) asks for location permission on first tap,
+then follows the user; tapping again switches to compass heading. It refuses to
+follow a user outside Chicago, since native tracking ignores `maxBounds` and
+would drag the city map to wherever they are. Permissions are declared in
+`ios/WmChicagoMaps/Info.plist` (`NSLocationWhenInUseUsageDescription`) and
+`android/app/src/main/AndroidManifest.xml` (fine + coarse location).

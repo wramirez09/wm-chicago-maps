@@ -219,10 +219,6 @@ yarn-error.log
 !.yarn/sdks
 !.yarn/versions
 
-# Local env (react-native-config) and ingest-script secrets
+# Local env (react-native-config)
 .env
 .env.local
-scripts/.env
-
-# Ingest script download cache
-.cache/
