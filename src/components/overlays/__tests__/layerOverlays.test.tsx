@@ -14,7 +14,8 @@ jest.mock('@maplibre/maplibre-react-native', () => {
 });
 
 const EMPTY = {type: 'FeatureCollection', features: []};
-const line = (properties: object) => ({
+// Generic so each overlay's properties keep their contract type.
+const line = <P,>(properties: P) => ({
   type: 'FeatureCollection' as const,
   features: [
     {
@@ -47,7 +48,7 @@ describe('API-backed layer overlays', () => {
   });
 
   it('passes the API collection straight through once loaded', async () => {
-    const data = line({name: 'Kennedy', ref: 'I 90', kind: 'motorway', localName: 'Kennedy'});
+    const data = line({name: 'Kennedy', ref: 'I 90', kind: 'motorway' as const, localName: 'Kennedy'});
     const renderer = await render(<ExpresswayOverlay visible data={data} onPress={jest.fn()} />);
 
     expect(sources(renderer)[0].props.data).toBe(data);
