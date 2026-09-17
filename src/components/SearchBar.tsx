@@ -9,7 +9,15 @@ import {
   View,
 } from 'react-native';
 
-import {searchLocations, type SearchResult} from '../search/searchIndex';
+import {useLayer, usePlaces} from '../api/hooks';
+import {CHICAGO_BOUNDS} from '../config/map';
+import {
+  buildSearchIndex,
+  type SearchIndex,
+  type SearchResult,
+  type SearchSources,
+  searchLocations,
+} from '../search/searchIndex';
 
 /** Height of the search field itself, excluding the results dropdown. */
 export const SEARCH_FIELD_HEIGHT = 44;
@@ -25,9 +33,41 @@ export function SearchBar({onSelect}: Props) {
   // one with .clear()/.blur()) is what the ref actually holds.
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
 
-  // The index is a pure function of the query, and searching ~1k entries is
+  // The same queries MapScreen runs, so these read the shared (and persisted)
+  // cache rather than making requests of their own. Landmarks are searched
+  // citywide, not just in the current viewport.
+  const expressways = useLayer('expressways');
+  const arterials = useLayer('arterials');
+  const transitLines = useLayer('transit-lines');
+  const transitStations = useLayer('transit-stations');
+  const landmarks = usePlaces(CHICAGO_BOUNDS, 'landmark');
+
+  const sources = useMemo<SearchSources>(
+    () => ({
+      expressways: expressways.data,
+      arterials: arterials.data,
+      transitLines: transitLines.data,
+      transitStations: transitStations.data,
+      landmarks: landmarks.data,
+    }),
+    [expressways.data, arterials.data, transitLines.data, transitStations.data, landmarks.data],
+  );
+
+  // Built on the first real query, not when layers load: walking ~25k features
+  // takes tens of milliseconds that someone who never searches should not pay.
+  // Rebuilt only when a source collection changes identity (a refetch that
+  // replaced it), never per keystroke. Searching the built index is
   // sub-millisecond, so there is nothing to debounce.
-  const results = useMemo(() => searchLocations(query), [query]);
+  const indexCache = useRef<{sources: SearchSources; index: SearchIndex} | null>(null);
+  const results = useMemo(() => {
+    if (query.trim().length < 2) {
+      return [];
+    }
+    if (indexCache.current?.sources !== sources) {
+      indexCache.current = {sources, index: buildSearchIndex(sources)};
+    }
+    return searchLocations(indexCache.current.index, query);
+  }, [query, sources]);
 
   const clear = useCallback(() => {
     setQuery('');

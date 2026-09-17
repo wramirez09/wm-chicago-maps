@@ -1,19 +1,31 @@
 /**
- * Offline search over the app's own map data.
+ * Search over the map's own data: the API's layers and landmark places.
  *
- * Everything searchable is already committed in `src/data`, so this needs no
- * geocoding service, no API key and no network — results appear as fast as the
- * user types. The trade-off is scope: it finds streets, expressways, CTA
- * stations and landmarks, but *not* street addresses ("1060 W Addison"). See
- * the README for wiring a geocoder in as an extra result source.
+ * No request is made per keystroke. The index is built from collections the
+ * map has already loaded (and persisted), so results appear as fast as the
+ * user types, including offline once layers are cached. The trade-off is
+ * scope: it finds streets, expressways, CTA stations and landmarks, but *not*
+ * street addresses ("1060 W Addison"), which would need a geocoding endpoint.
  */
+import type {PlaceCollection} from '@wm/shared';
 
+import type {
+  ArterialCollection,
+  ExpresswayCollection,
+  TransitLineCollection,
+  TransitStationCollection,
+} from '../api/types';
 import {LAYER_ACCENT, type LayerKey} from '../config/layers';
 import {MAX_ZOOM, MIN_ZOOM} from '../config/map';
-import {ARTERIALS} from '../data/arterials';
-import {EXPRESSWAYS} from '../data/expressways';
-import {LANDMARKS} from '../data/landmarks';
-import {TRANSIT_LINES, TRANSIT_STATIONS} from '../data/transit';
+
+/** Whatever collections have loaded; a missing one just contributes nothing. */
+export type SearchSources = {
+  expressways?: ExpresswayCollection;
+  arterials?: ArterialCollection;
+  transitLines?: TransitLineCollection;
+  transitStations?: TransitStationCollection;
+  landmarks?: PlaceCollection;
+};
 
 export type SearchResultKind =
   | 'landmark'
@@ -58,20 +70,19 @@ type Entry = {result: SearchResult; haystack: string; compact: string};
 /** How many results may share one name before the rest are dropped. */
 const MAX_PER_NAME = 2;
 
-let cachedEntries: Entry[] | null = null;
+/** A built index. Opaque: build with buildSearchIndex, query with searchLocations. */
+export type SearchIndex = {readonly entries: readonly Entry[]};
 
 /**
- * Built once, lazily. Walking ~25k features costs tens of milliseconds, which
- * is fine on first keystroke but not worth paying during app startup.
+ * Walks every feature once. ~25k features cost tens of milliseconds, so callers
+ * should build lazily (on the first real query) and rebuild only when a source
+ * collection changes, not per keystroke.
  */
-function entries(): Entry[] {
-  if (!cachedEntries) {
-    cachedEntries = buildEntries();
-  }
-  return cachedEntries;
+export function buildSearchIndex(sources: SearchSources): SearchIndex {
+  return {entries: buildEntries(sources)};
 }
 
-export function searchLocations(query: string, limit = 8): SearchResult[] {
+export function searchLocations(index: SearchIndex, query: string, limit = 8): SearchResult[] {
   const needle = normalize(query);
   if (needle.length < 2) {
     return [];
@@ -79,7 +90,7 @@ export function searchLocations(query: string, limit = 8): SearchResult[] {
 
   const scored: {entry: Entry; score: number}[] = [];
 
-  for (const candidate of entries()) {
+  for (const candidate of index.entries) {
     const score = scoreOf(candidate, needle);
     if (score !== null) {
       scored.push({entry: candidate, score});
@@ -146,15 +157,15 @@ function normalize(value: string): string {
     .trim();
 }
 
-function buildEntries(): Entry[] {
+function buildEntries(sources: SearchSources): Entry[] {
   const built: Entry[] = [];
 
-  for (const {properties, geometry} of LANDMARKS.features) {
+  for (const {properties, geometry} of sources.landmarks?.features ?? []) {
     built.push(
       makeEntry({
         id: `landmark:${properties.id}`,
         title: properties.name,
-        subtitle: properties.neighborhood,
+        subtitle: properties.communityArea ?? 'Landmark',
         kind: 'landmark',
         layer: 'landmarks',
         center: [geometry.coordinates[0], geometry.coordinates[1]],
@@ -169,7 +180,7 @@ function buildEntries(): Entry[] {
   // not two stations — collapse those.
   const seenStations = new Set<string>();
 
-  TRANSIT_STATIONS.features.forEach(({properties, geometry}, index) => {
+  (sources.transitStations?.features ?? []).forEach(({properties, geometry}, index) => {
     const key = `${properties.name}|${properties.lines}`;
     if (seenStations.has(key)) {
       return;
@@ -192,7 +203,7 @@ function buildEntries(): Entry[] {
   });
 
   for (const group of groupLines(
-    TRANSIT_LINES.features,
+    sources.transitLines?.features ?? [],
     f => f.properties.line,
   )) {
     built.push(
@@ -208,10 +219,10 @@ function buildEntries(): Entry[] {
     );
   }
 
-  // Expressways are grouped by the name people use, so the Kennedy's 279
+  // Expressways are grouped by the name people use, so the Kennedy's many
   // separate OSM ways collapse into one result.
   for (const group of groupLines(
-    EXPRESSWAYS.features,
+    sources.expressways?.features ?? [],
     f => f.properties.localName || f.properties.name || f.properties.ref,
   )) {
     const refs = new Set(
@@ -230,7 +241,7 @@ function buildEntries(): Entry[] {
     );
   }
 
-  for (const group of groupLines(ARTERIALS.features, f => f.properties.name)) {
+  for (const group of groupLines(sources.arterials?.features ?? [], f => f.properties.name)) {
     built.push(
       makeEntry({
         id: `street:${group.key}`,
