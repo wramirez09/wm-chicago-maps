@@ -1,29 +1,19 @@
 /**
  * Address and place lookup from GET /v1/geocode.
  *
- * PROVISIONAL CONTRACT. The endpoint is being built in the backend alongside
- * this; until its schema is exported from @wm/shared and re-vendored, the
- * shape the app expects is defined here:
- *
  *   GET /v1/geocode?q=<text>&limit=<n>
  *   200 → FeatureCollection<Point, {name: string | null, label: string}>
  *
  * `label` is the full display line ("Nathanael Greene Elementary School,
  * 3525 South Honore Street, Chicago"); `name` is the POI name, null for a
- * plain address. Results are restricted to Chicago by the backend. When the
- * shared package gains `GeocodeCollection`, import it from '@wm/shared' and
- * delete the local schema below.
+ * plain address. Results are restricted to Chicago by the backend, which takes
+ * no bbox from the app. The response schema is the backend's own, vendored
+ * into src/api/schema; only the app-facing result shape below is local.
  */
-import {PointGeometry, feature, featureCollection} from '@wm/shared';
-import {z} from 'zod';
+import {GeocodeCollection} from '@wm/shared';
+import type {z} from 'zod';
 
 import {ApiError, apiRequest} from './client';
-
-export const GeocodeProperties = z.object({
-  name: z.string().nullable(),
-  label: z.string(),
-});
-export const GeocodeCollection = featureCollection(feature(PointGeometry, GeocodeProperties));
 
 /** Shortest query sent to the API. Two letters match half the city. */
 export const GEOCODE_MIN_LENGTH = 3;

@@ -32,11 +32,16 @@ npm install
 (cd ios && bundle install && bundle exec pod install)
 ```
 
-Then point the app at a running backend. Copy `.env.example` to `.env` and set
-`API_URL` (the simulator default is `http://localhost:3000`; see the comments
-for the Android emulator and physical devices). `react-native-config` inlines
-it at **native build** time, so changing it needs `npm run ios`/`android`, not
-a Metro reload.
+That is enough to run: the app ships pointing at the deployed backend,
+`https://chicago-api.fly.dev`, and needs no API key of its own — every upstream
+credential lives on the server.
+
+To run against a backend on your own machine instead, copy `.env.example` to
+`.env` and set `API_URL` (`http://localhost:3000` for the iOS simulator,
+`http://10.0.2.2:3000` for the Android emulator, and your Mac's LAN IP for a
+physical device, where `localhost` means the phone). `react-native-config`
+inlines it at **native build** time, so changing it needs
+`npm run ios`/`android`, not a Metro reload.
 
 To run the backend locally, in the backend repo:
 
@@ -101,15 +106,19 @@ Note: this project uses **npm** (`package-lock.json`), not yarn or pnpm.
 
 ## Map data
 
-Overlay data lives in the backend. It ingests the layers from OpenStreetMap on
-a weekly job and serves them as GeoJSON; the app no longer bundles or
-generates any of it.
+Overlay data lives in the backend. A weekly job ingests it and serves it as
+GeoJSON; the app no longer bundles or generates any of it. Sources vary by
+layer — some OpenStreetMap, some the CTA's published data — so each layer
+carries its own `attribution` in `GET /v1/layers`, and the map credits the
+sources for the layers actually switched on (`LayerAttribution`).
 
 | Overlay | Endpoint |
 | --- | --- |
 | Expressways | `GET /v1/layers/expressways` |
 | Arterial streets | `GET /v1/layers/arterials` |
 | CTA 'L' lines / stations | `GET /v1/layers/transit-lines`, `GET /v1/layers/transit-stations` |
+| CTA bus routes / stops | `GET /v1/layers/bus-routes`, `GET /v1/layers/bus-stops` |
+| Metra lines / stations | `GET /v1/layers/metra-lines`, `GET /v1/layers/metra-stations` |
 | Landmarks | `GET /v1/places?bbox=…&category=landmark` |
 | Neighbourhoods | `GET /v1/areas` |
 | Divvy | `GET /v1/transit/divvy` |
@@ -118,6 +127,11 @@ generates any of it.
 Layers are fetched once, persisted to disk (MMKV), and revalidated with their
 ETag (`If-None-Match`); a `304` keeps the cached body. So after the first
 successful launch the overlays draw immediately, including with the API down.
+The bus and Metra layers are fetched only while their chip is on: bus-stops
+alone is 10,556 points (1.6 MB uncompressed), drawn as one clustered symbol
+source gated to zoom 15+ rather than a component per stop. A `404` from
+`/v1/layers/:key` means that layer has never been ingested, which the client
+raises as `MissingLayerError` — not the same as a collection with no features.
 Landmarks and events follow the viewport: the camera's region is debounced
 300 ms and only refetched when the view moves by more than ~10%.
 
@@ -170,14 +184,17 @@ Three behaviours worth knowing before changing the ranking:
 - Stations with the same name *and* the same serving lines are collapsed —
   that pattern means one platform split across two OSM records.
 
-**It does not do street addresses.** "1060 W Addison" finds nothing. That needs
-a geocoding endpoint in the backend; merge its hits into the same
-`SearchResult` shape and the UI needs no change.
+Street addresses come from the backend instead of the local index: `SearchBar`
+debounces the query into `GET /v1/geocode` (minimum 3 characters) and shows its
+hits alongside the local ones, so "1060 W Addison" resolves. A failed or
+unreachable geocoder degrades to the local index rather than an error.
 
 ## Backend API
 
 `src/api/client.ts` is the only thing in the app that makes HTTP requests. It
-prefixes `API_URL`, times out after 10 s, validates every response with the
+prefixes `API_URL`, times out after 10 s (30 s for the first request of a
+session, which may be waking Fly's suspended machines), validates every
+response with the
 backend's zod schemas (`schema.parse`, so contract drift fails loudly instead
 of rendering undefined fields), sends the Bearer token when signed in, and
 throws one `ApiError` carrying the backend's `statusCode` and `message`.
@@ -215,12 +232,11 @@ its endpoint exists.
 
 | Feature | Needs |
 | --- | --- |
-| Station arrivals | A CTA `mapId` on transit-stations features (`/v1/transit/arrivals` exists, but there is no stop id to call it with) |
-| Address search | A geocoding endpoint |
+| Live arrivals | `CTA_TRAIN_KEY` / `CTA_BUS_KEY` set as Fly secrets — until then rail and bus arrivals answer `502` and the card says so. Stop ids are on the features, so nothing else is missing |
+| Metra arrivals | Metra support in the backend (`/v1/transit/arrivals?mode=metra` answers `400`, "not implemented yet") |
 | Weather chip | A weather endpoint |
-| Parks, wards, bus stops layers | Boundary / stop layers |
+| Parks, wards layers | Boundary layers |
 | Businesses, ownership | Places ingested from licences |
-| Metra positions | Metra support (`/v1/transit/arrivals` answers "not implemented") |
 
 ### Auth
 

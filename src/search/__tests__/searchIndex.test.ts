@@ -12,10 +12,12 @@ type Coord = [number, number];
 const line = (a: Coord, b: Coord) => ({type: 'LineString' as const, coordinates: [a, b]});
 const point = (c: Coord) => ({type: 'Point' as const, coordinates: c});
 
-const station = (name: string, lines: string, at: Coord) => ({
+// stopId is what makes arrivals callable; the index does not read it, but the
+// contract requires it, so the fixtures carry the null a station without one has.
+const station = (name: string, lines: string, at: Coord, stopId: string | null = null) => ({
   type: 'Feature' as const,
   geometry: point(at),
-  properties: {name, lines},
+  properties: {name, lines, stopId},
 });
 
 // Four 'L' stations share the name Western, as in the real system.

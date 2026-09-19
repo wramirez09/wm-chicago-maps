@@ -9,7 +9,7 @@
 import {ErrorResponse, TokenPair} from '@wm/shared';
 import type {z} from 'zod';
 
-import {API_URL, REQUEST_TIMEOUT_MS} from './config';
+import {API_URL, COLD_START_TIMEOUT_MS, REQUEST_TIMEOUT_MS} from './config';
 import {clearTokens, getAccessToken, getRefreshToken, setTokens} from './tokens';
 
 export class ApiError extends Error {
@@ -125,11 +125,27 @@ async function performRefresh(): Promise<boolean> {
   }
 }
 
+/**
+ * False until a request has come back from the API, whatever it answered.
+ *
+ * The backend's machines suspend when idle, so the first call of a session may
+ * be waking them; see COLD_START_TIMEOUT_MS. Any response at all — including an
+ * error status — proves they are awake, so only a total failure to reach the
+ * API leaves the longer budget in place for the next attempt.
+ */
+let apiIsAwake = false;
+
+/** Exported for tests, which need each case to start from a cold backend. */
+export function resetColdStart(): void {
+  apiIsAwake = false;
+}
+
 /** One attempt, no refresh. */
 async function send(path: string, options: RequestOptions): Promise<RawResponse> {
   const url = buildUrl(path, options.query);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutMs = apiIsAwake ? REQUEST_TIMEOUT_MS : COLD_START_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onCallerAbort = () => controller.abort();
   options.signal?.addEventListener('abort', onCallerAbort);
 
@@ -160,7 +176,7 @@ async function send(path: string, options: RequestOptions): Promise<RawResponse>
       aborted
         ? options.signal?.aborted
           ? 'Request cancelled'
-          : `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+          : `Request timed out after ${timeoutMs / 1000}s`
         : `Could not reach the API at ${API_URL}`,
       url,
     );
@@ -168,6 +184,8 @@ async function send(path: string, options: RequestOptions): Promise<RawResponse>
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', onCallerAbort);
   }
+
+  apiIsAwake = true;
 
   const text = await response.text();
   let json: unknown;

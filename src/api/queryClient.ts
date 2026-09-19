@@ -69,7 +69,7 @@ export function shouldPersistQuery(query: Pick<Query, 'queryKey' | 'queryHash' |
  * written against the old contract is discarded instead of failing parse.
  * Tracks the backend commit the schemas were vendored from.
  */
-const CACHE_BUSTER = 'shared@9e2c168';
+const CACHE_BUSTER = 'shared@883b4f7';
 
 export function createQueryClient(): QueryClient {
   return new QueryClient({

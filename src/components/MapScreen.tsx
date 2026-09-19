@@ -21,15 +21,18 @@ import type {Independence, PlaceSummary} from '@wm/shared';
 
 import {DirectionsAction} from './DirectionsAction';
 import {FeatureCard, type MapSelection} from './FeatureCard';
+import {LayerAttribution} from './LayerAttribution';
 import {LayerToggle} from './LayerToggle';
 import {LocateButton} from './LocateButton';
 import {SEARCH_FIELD_HEIGHT, SearchBar} from './SearchBar';
 import {ArterialOverlay} from './overlays/ArterialOverlay';
 import {BoundaryOverlay} from './overlays/BoundaryOverlay';
+import {BusOverlay} from './overlays/BusOverlay';
 import {DivvyOverlay} from './overlays/DivvyOverlay';
 import {EventOverlay, type EventFeatureProperties} from './overlays/EventOverlay';
 import {ExpresswayOverlay} from './overlays/ExpresswayOverlay';
 import {LandmarkOverlay} from './overlays/LandmarkOverlay';
+import {MetraOverlay} from './overlays/MetraOverlay';
 import {RouteOverlay} from './overlays/RouteOverlay';
 import {TransitOverlay} from './overlays/TransitOverlay';
 import {
@@ -52,8 +55,12 @@ import {fetchWalkingRoute} from '../api/route';
 import type {
   AreaSummary,
   ArterialProperties,
+  BusRouteProperties,
+  BusStopProperties,
   DivvyStation,
   ExpresswayProperties,
+  MetraLineProperties,
+  MetraStationProperties,
   RouteResult,
   TransitLineProperties,
   TransitStationProperties,
@@ -93,7 +100,10 @@ const INITIAL_VISIBILITY: LayerVisibility = {
   transit: true,
   landmarks: true,
   // Live layers start off: turning one on is what makes its first request,
-  // so the map still opens instantly and works offline.
+  // so the map still opens instantly and works offline. Buses and Metra are
+  // fetched the same way, for size rather than freshness.
+  bus: false,
+  metra: false,
   divvy: false,
   events: false,
   neighborhoods: false,
@@ -148,6 +158,12 @@ export function MapScreen() {
   const arterials = useLayer('arterials');
   const transitLines = useLayer('transit-lines');
   const transitStations = useLayer('transit-stations');
+  // Buses and Metra are fetched only while their layer is on: together they
+  // are bigger than everything else on the map put together.
+  const busRoutes = useLayer('bus-routes', {enabled: visibility.bus});
+  const busStops = useLayer('bus-stops', {enabled: visibility.bus});
+  const metraLines = useLayer('metra-lines', {enabled: visibility.metra});
+  const metraStations = useLayer('metra-stations', {enabled: visibility.metra});
 
   // The bbox that places are fetched for. Starts as the whole city so
   // landmarks draw before the first camera event; after that it follows the
@@ -540,15 +556,54 @@ export function MapScreen() {
             visible={visibility.transit}
             lines={transitLines.data}
             stations={transitStations.data}
-            onPress={selectFeature<
-              TransitLineProperties | TransitStationProperties
-            >('transit', p =>
-              'line' in p
-                ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
+            onPress={selectFeature<TransitLineProperties | TransitStationProperties>(
+              'transit',
+              p =>
+                'line' in p
+                  ? {title: `${p.line} Line`, subtitle: 'CTA rail'}
+                  : {
+                      title: p.name,
+                      subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
+                      // A station whose upstream stop id is unknown carries
+                      // null, and simply offers no arrivals.
+                      live: p.stopId
+                        ? {kind: 'arrivals', stop: p.stopId, mode: 'rail'}
+                        : undefined,
+                    },
+            )}
+          />
+          <BusOverlay
+            visible={visibility.bus}
+            routes={busRoutes.data}
+            stops={busStops.data}
+            onPress={selectFeature<BusRouteProperties | BusStopProperties>('bus', p =>
+              'route' in p
+                ? {title: `Route ${p.route}`, subtitle: p.name || 'CTA bus'}
                 : {
                     title: p.name,
-                    subtitle: p.lines ? `CTA · ${p.lines}` : 'CTA station',
+                    subtitle: p.routes ? `Bus stop · ${p.routes}` : 'Bus stop',
+                    live: p.stopId
+                      ? {kind: 'arrivals', stop: p.stopId, mode: 'bus'}
+                      : undefined,
                   },
+            )}
+          />
+          <MetraOverlay
+            visible={visibility.metra}
+            lines={metraLines.data}
+            stations={metraStations.data}
+            onPress={selectFeature<MetraLineProperties | MetraStationProperties>(
+              'metra',
+              p =>
+                'line' in p
+                  ? {title: `${p.line} Line`, subtitle: 'Metra'}
+                  : {
+                      title: p.name,
+                      subtitle: p.lines ? `Metra · ${p.lines}` : 'Metra station',
+                      live: p.stopId
+                        ? {kind: 'arrivals', stop: p.stopId, mode: 'metra'}
+                        : undefined,
+                    },
             )}
           />
           <RouteOverlay route={route} />
@@ -610,8 +665,19 @@ export function MapScreen() {
         ))}
       </View>
 
-      {/* Bottom-right, above the attribution button, and hidden behind the
-          card while one is open so the two never overlap. */}
+      {/* Bottom-left: credits for the overlay data, which differ per layer and
+          come from the layer index. Hidden behind the card, like the locate
+          button, so nothing sits under an open card. */}
+      {selected ? null : (
+        <View
+          style={[styles.attributionWrapper, {bottom: insets.bottom + EDGE}]}
+          pointerEvents="box-none">
+          <LayerAttribution visibility={visibility} />
+        </View>
+      )}
+
+      {/* Bottom-right, above the basemap's own attribution button, and hidden
+          behind the card while one is open so the two never overlap. */}
       {selected ? null : (
         <View
           style={[styles.locateWrapper, {bottom: insets.bottom + 56}]}
@@ -699,6 +765,7 @@ const styles = StyleSheet.create({
   },
   hintText: {fontSize: 12, color: '#ffffff', fontWeight: '500'},
   locateWrapper: {position: 'absolute', right: EDGE},
+  attributionWrapper: {position: 'absolute', left: EDGE, right: 56},
   cardWrapper: {
     position: 'absolute',
     left: 16,

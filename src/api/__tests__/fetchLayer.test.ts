@@ -1,6 +1,6 @@
 import {QueryClient} from '@tanstack/react-query';
 
-import {apiKeys, fetchLayer} from '../hooks';
+import {apiKeys, fetchLayer, MissingLayerError} from '../hooks';
 import {cacheStorage} from '../storage';
 import {mockFetch} from './mockFetch';
 
@@ -61,6 +61,18 @@ describe('fetchLayer', () => {
 
     expect(data).toEqual(ARTERIALS);
     expect(requests.length).toBeGreaterThanOrEqual(1);
+    restore();
+  });
+
+  // A layer the backend knows but has never ingested. This is not an empty
+  // collection: drawing nothing and saying nothing would present a blank map
+  // as an accurate one.
+  it('reports a never-ingested layer as missing rather than empty', async () => {
+    const {restore} = mockFetch([
+      {status: 404, body: {statusCode: 404, error: 'Not Found', message: 'no run for bus-stops'}},
+    ]);
+
+    await expect(fetchLayer('bus-stops', queryClient)).rejects.toThrow(MissingLayerError);
     restore();
   });
 

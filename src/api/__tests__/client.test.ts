@@ -1,10 +1,14 @@
 import {LayerIndex} from '@wm/shared';
 
-import {ApiError, apiFetch, apiRequest, buildUrl} from '../client';
+import {ApiError, apiFetch, apiRequest, buildUrl, resetColdStart} from '../client';
+import {COLD_START_TIMEOUT_MS, REQUEST_TIMEOUT_MS} from '../config';
 import {authStorage} from '../storage';
 import {mockFetch} from './mockFetch';
 
-afterEach(() => authStorage.clearAll());
+afterEach(() => {
+  authStorage.clearAll();
+  resetColdStart();
+});
 
 describe('buildUrl', () => {
   it('prefixes API_URL and drops empty query values', () => {
@@ -91,6 +95,65 @@ describe('apiRequest', () => {
     const {restore} = mockFetch([{body: {layers: [{key: 'not-a-layer'}]}}]);
 
     await expect(apiRequest('/v1/layers', LayerIndex)).rejects.toThrow();
+    restore();
+  });
+});
+
+/**
+ * Fly suspends the backend's machines when idle, so the request that wakes them
+ * can take far longer than a warm one. Timing that out on the usual budget
+ * would report the API as unreachable while it was merely booting.
+ */
+describe('cold start', () => {
+  /** A fetch that never settles, so only the abort timer can end the request. */
+  function hangingFetch() {
+    const original = globalThis.fetch;
+    globalThis.fetch = jest.fn(
+      (_input: RequestInfo | URL, init: RequestInit = {}) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }),
+    ) as unknown as typeof fetch;
+    return () => {
+      globalThis.fetch = original;
+    };
+  }
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('gives the first request of the session the longer budget', async () => {
+    const restore = hangingFetch();
+
+    const pending = apiFetch('/v1/layers');
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+    // Still waiting: the warm timeout has passed and has not fired.
+    let settled = false;
+    pending.catch(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(COLD_START_TIMEOUT_MS - REQUEST_TIMEOUT_MS);
+    await expect(pending).rejects.toThrow(`Request timed out after ${COLD_START_TIMEOUT_MS / 1000}s`);
+    restore();
+  });
+
+  it('drops to the normal timeout once the API has answered once', async () => {
+    const warm = mockFetch([{body: {}}]);
+    await apiFetch('/v1/layers');
+    warm.restore();
+
+    const restore = hangingFetch();
+    const pending = apiFetch('/v1/layers');
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
+
+    await expect(pending).rejects.toThrow(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
     restore();
   });
 });

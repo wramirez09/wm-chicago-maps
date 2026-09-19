@@ -8,11 +8,15 @@ import {
   ArrivalsQuery,
   Arrivals,
   ArterialCollection,
+  BusRouteCollection,
+  BusStopCollection,
   DivvyStations,
   EventCollection,
   ExpresswayCollection,
   LayerIndex,
   type LayerKey,
+  MetraLineCollection,
+  MetraStationCollection,
   PlaceCategory,
   PlaceCollection,
   PlaceDetail,
@@ -22,7 +26,7 @@ import {
 import {type QueryClient, useQuery, useQueryClient} from '@tanstack/react-query';
 import type {z} from 'zod';
 
-import {apiFetch, apiRequest} from './client';
+import {ApiError, apiFetch, apiRequest, type RawResponse} from './client';
 import {fetchGeocode, GEOCODE_MIN_LENGTH} from './geocode';
 import {PERSIST_MAX_AGE, STALE} from './queryClient';
 import {cacheStorage} from './storage';
@@ -46,16 +50,37 @@ export const apiKeys = {
   geocode: (query: string) => ['geocode', query] as const,
 };
 
+/** The response schema for each layer `GET /v1/layers/:key` serves. */
 const LAYER_SCHEMAS = {
   expressways: ExpresswayCollection,
   arterials: ArterialCollection,
   'transit-lines': TransitLineCollection,
   'transit-stations': TransitStationCollection,
-} as const;
+  'bus-routes': BusRouteCollection,
+  'bus-stops': BusStopCollection,
+  'metra-lines': MetraLineCollection,
+  'metra-stations': MetraStationCollection,
+} as const satisfies Record<LayerKey, unknown>;
 
 export type LayerData<K extends LayerKey> = z.infer<(typeof LAYER_SCHEMAS)[K]>;
 
 const etagKey = (key: LayerKey) => `etag:layers:${key}`;
+
+/**
+ * A layer the backend knows but has never ingested: `GET /v1/layers/:key`
+ * answers 404, which is not the same as a collection with no features. The
+ * distinction has to survive to the UI, which says the layer is unavailable
+ * rather than drawing an empty map and calling it accurate.
+ */
+export class MissingLayerError extends Error {
+  readonly key: LayerKey;
+
+  constructor(key: LayerKey) {
+    super(`The ${key} layer has not been ingested yet.`);
+    this.name = 'MissingLayerError';
+    this.key = key;
+  }
+}
 
 /**
  * GET /v1/layers/:key with ETag revalidation.
@@ -75,7 +100,15 @@ export async function fetchLayer<K extends LayerKey>(
   // could only produce a 304 we cannot use.
   const etag = cached ? cacheStorage.getString(etagKey(key)) : undefined;
 
-  let response = await apiFetch(path, {etag, signal});
+  let response: RawResponse;
+  try {
+    response = await apiFetch(path, {etag, signal});
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) {
+      throw new MissingLayerError(key);
+    }
+    throw error;
+  }
 
   if (response.status === 304) {
     if (cached) {

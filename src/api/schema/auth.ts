@@ -1,6 +1,6 @@
 /**
  * VENDORED from wramirez09/wm-chicago-maps-backend packages/shared/src/auth.ts
- * at commit 9e2c168ba920e9c02c806781f9c7c2fb776b4066. Do not edit here — change the backend and re-vendor.
+ * at commit 883b4f761de8a60baeb30757ea27cc49f92b3fef. Do not edit here — change the backend and re-vendor.
  *
  * Only change from upstream: relative imports drop their ".js" suffix. The
  * backend is NodeNext ESM, where "./common.js" resolves to common.ts; Metro
